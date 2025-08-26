@@ -1,0 +1,131 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WGPU Execution Flow</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #111827; /* Dark Gray */
+            color: #F9FAFB; /* Almost White */
+        }
+        /* Style for the main container to center content */
+        .main-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 2rem;
+            gap: 2rem;
+        }
+        /* Style for each stage box */
+        .stage-box {
+            background-color: #1F2937; /* Darker Gray */
+            border: 1px solid #4B5563; /* Gray */
+            border-radius: 0.5rem;
+            padding: 1.5rem;
+            width: 100%;
+            max-width: 600px;
+            text-align: center;
+            position: relative;
+        }
+        /* Style for the connecting arrows */
+        .stage-box:not(:last-child)::after {
+            content: '↓';
+            font-size: 2rem;
+            color: #6B7280; /* Lighter Gray */
+            position: absolute;
+            bottom: -2.5rem;
+            left: 50%;
+            transform: translateX(-50%);
+        }
+        .stage-title {
+            font-size: 1.25rem;
+            font-weight: 500;
+            color: #E5E7EB; /* Light Gray */
+            margin-bottom: 0.5rem;
+        }
+        .stage-description {
+            font-size: 0.9rem;
+            color: #D1D5DB; /* Softer Light Gray */
+        }
+        .sub-item {
+            background-color: #374151; /* Medium Gray */
+            padding: 0.5rem;
+            margin-top: 0.75rem;
+            border-radius: 0.375rem;
+            border-left: 3px solid #6B7280;
+            text-align: left;
+            font-size: 0.85rem;
+        }
+    </style>
+</head>
+<body class="antialiased">
+
+    <div class="main-container">
+
+        <header class="text-center mb-8">
+            <h1 class="text-3xl font-bold tracking-tight text-white sm:text-4xl">WGPU Rendering Pipeline Visualization</h1>
+            <p class="mt-2 text-lg text-gray-400">A high-level overview of the steps to render a triangle.</p>
+        </header>
+
+        <!-- Stage 1: Initialization -->
+        <div class="stage-box">
+            <h2 class="stage-title">1. Initialization & Setup</h2>
+            <p class="stage-description">Establish communication with the physical GPU and prepare the drawing surface.</p>
+            <div class="sub-item"><strong>Instance:</strong> Entry point to the WGPU API.</div>
+            <div class="sub-item"><strong>Adapter:</strong> Represents a physical GPU.</div>
+            <div class="sub-item"><strong>Device & Queue:</strong> Logical connection to the GPU for creating resources and submitting commands.</div>
+            <div class="sub-item"><strong>Surface:</strong> Links to the window where the final image will be displayed.</div>
+        </div>
+
+        <!-- Stage 2: Resource Creation -->
+        <div class="stage-box">
+            <h2 class="stage-title">2. Prepare Resources</h2>
+            <p class="stage-description">Allocate GPU memory for data and define the programs (shaders) that will run on the GPU.</p>
+            <div class="sub-item"><strong>Vertex Buffer:</strong> A buffer created on the GPU to hold vertex data (positions, colors, etc.).</div>
+            <div class="sub-item"><strong>Shaders (WGSL):</strong> Programs that run on the GPU.
+                <ul class="list-disc list-inside mt-1 pl-4 text-gray-300">
+                    <li><strong>Vertex Shader:</strong> Processes each vertex.</li>
+                    <li><strong>Fragment Shader:</strong> Determines the color of each pixel.</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- Stage 3: Pipeline Definition -->
+        <div class="stage-box">
+            <h2 class="stage-title">3. Define the Render Pipeline</h2>
+            <p class="stage-description">Configure the GPU state. This object ties the data format, shaders, and render settings together.</p>
+            <div class="sub-item"><strong>Vertex State:</strong> How to read data from the vertex buffer.</div>
+            <div class="sub-item"><strong>Primitive State:</strong> How to assemble vertices (e.g., as triangles).</div>
+            <div class="sub-item"><strong>Fragment State:</strong> Configures the output color format.</div>
+            <div class="sub-item"><strong>Pipeline Layout:</strong> Describes the resources (like uniform buffers) the shaders will access.</div>
+        </div>
+
+        <!-- Stage 4: Command Encoding -->
+        <div class="stage-box">
+            <h2 class="stage-title">4. Record GPU Commands</h2>
+            <p class="stage-description">Record a sequence of commands into a command buffer. The GPU does not execute these immediately.</p>
+            <div class="sub-item"><strong>Command Encoder:</strong> The object used to record commands.</div>
+            <div class="sub-item"><strong>Begin Render Pass:</strong> Starts a block of drawing commands targeting a specific texture (the screen).</div>
+            <div class="sub-item"><strong>Set Pipeline & Buffers:</strong> Binds the pipeline and vertex buffer.</div>
+            <div class="sub-item"><strong>Draw Call:</strong> The actual command to draw the vertices (`draw(3, 1, 0, 0)`).</div>
+            <div class="sub-item"><strong>End Render Pass:</strong> Finishes the block of drawing commands.</div>
+        </div>
+
+        <!-- Stage 5: Submission & Execution -->
+        <div class="stage-box">
+            <h2 class="stage-title">5. Submit to GPU</h2>
+            <p class="stage-description">Send the recorded commands to the GPU for execution and display the result.</p>
+            <div class="sub-item"><strong>Finish Encoding:</strong> Finalizes the command buffer.</div>
+            <div class="sub-item"><strong>Queue Submission:</strong> Submits the command buffer to the GPU's command queue.</div>
+            <div class="sub-item"><strong>Present:</strong> The final rendered image is displayed on the screen.</div>
+        </div>
+
+    </div>
+
+</body>
+</html>

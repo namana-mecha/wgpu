@@ -2174,6 +2174,9 @@ impl Device {
                 entry_point: descriptor.entry_point.clone(),
                 num_workgroups: descriptor.num_workgroups,
             },
+            wgt::Backend::Glutin => {
+                todo!()
+            }
             wgt::Backend::Noop => {
                 return Err(pipeline::CreateShaderModuleError::NotCompiledForBackend)
             }

@@ -222,6 +222,8 @@ rustc-hash = { workspace = true, optional = true }
 
 # Backend: GLES
 glow = { workspace = true, optional = true }
+glutin = { workspace = true, features = ["egl", "wgl", "wayland", "x11"] }
+wayland-client = "*"
 
 ########################
 ### Platform: Native ###

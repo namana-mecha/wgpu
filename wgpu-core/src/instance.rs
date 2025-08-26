@@ -108,6 +108,8 @@ impl Instance {
         #[cfg(dx12)]
         this.try_add_hal(hal::api::Dx12, instance_desc);
         #[cfg(gles)]
+        this.try_add_hal(hal::api::Glutin, instance_desc);
+        #[cfg(gles)]
         this.try_add_hal(hal::api::Gles, instance_desc);
         #[cfg(feature = "noop")]
         this.try_add_hal(hal::api::Noop, instance_desc);

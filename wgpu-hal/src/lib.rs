@@ -253,6 +253,7 @@ pub mod dx12;
 /// GLES API internals.
 #[cfg(gles)]
 pub mod gles;
+pub mod glutin;
 /// Metal API internals.
 #[cfg(metal)]
 pub mod metal;
@@ -269,6 +270,8 @@ pub mod api {
     pub use super::dx12::Api as Dx12;
     #[cfg(gles)]
     pub use super::gles::Api as Gles;
+    #[cfg(gles)]
+    pub use super::glutin::Api as Glutin;
     #[cfg(metal)]
     pub use super::metal::Api as Metal;
     pub use super::noop::Api as Noop;

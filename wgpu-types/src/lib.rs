@@ -161,8 +161,10 @@ pub enum Backend {
     Dx12 = 3,
     /// OpenGL 3.3+ (Windows), OpenGL ES 3.0+ (Linux, Android, MacOS via Angle), and WebGL2
     Gl = 4,
+    /// Glutin API (Cross platform)
+    Glutin = 5,
     /// WebGPU in the browser
-    BrowserWebGpu = 5,
+    BrowserWebGpu = 6,
 }
 
 impl Backend {
@@ -173,6 +175,7 @@ impl Backend {
         Self::Metal,
         Self::Dx12,
         Self::Gl,
+        Self::Glutin,
         Self::BrowserWebGpu,
     ];
 
@@ -185,6 +188,7 @@ impl Backend {
             Backend::Metal => "metal",
             Backend::Dx12 => "dx12",
             Backend::Gl => "gl",
+            Backend::Glutin => "glutin",
             Backend::BrowserWebGpu => "webgpu",
         }
     }
@@ -245,6 +249,11 @@ bitflags::bitflags! {
         /// Supported on Linux/Android, the web through webassembly via WebGL, and Windows and
         /// macOS/iOS via ANGLE
         const GL = 1 << Backend::Gl as u32;
+
+
+        /// [`Backend::Gles`].
+        /// Support through Glutin
+        const GLUTIN = 1 << Backend::Glutin as u32;
 
         /// [`Backend::Metal`].
         /// Supported on macOS and iOS.
@@ -332,6 +341,7 @@ impl Backends {
                 "dx12" | "d3d12" => Self::DX12,
                 "metal" | "mtl" => Self::METAL,
                 "opengl" | "gles" | "gl" => Self::GL,
+                "glutin" => Self::GLUTIN,
                 "webgpu" => Self::BROWSER_WEBGPU,
                 "noop" => Self::NOOP,
                 b => {
