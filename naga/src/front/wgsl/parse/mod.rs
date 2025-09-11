@@ -235,6 +235,7 @@ impl<'a> BindingParser<'a> {
                 lexer.expect(Token::Paren('('))?;
                 self.blend_src
                     .set(parser.general_expression(lexer, ctx)?, name_span)?;
+                lexer.skip(Token::Separator(','));
                 lexer.expect(Token::Paren(')'))?;
             }
             _ => return Err(Box::new(Error::UnknownAttribute(name_span))),
@@ -676,6 +677,7 @@ impl Parser {
             | "texture_depth_cube"
             | "texture_depth_cube_array"
             | "texture_depth_multisampled_2d"
+            | "texture_external"
             | "texture_storage_1d"
             | "texture_storage_1d_array"
             | "texture_storage_2d"
@@ -1866,6 +1868,11 @@ impl Parser {
                 dim: crate::ImageDimension::D2,
                 arrayed: false,
                 class: crate::ImageClass::Depth { multi: true },
+            },
+            "texture_external" => ast::Type::Image {
+                dim: crate::ImageDimension::D2,
+                arrayed: false,
+                class: crate::ImageClass::External,
             },
             "texture_storage_1d" => {
                 let (format, access) = lexer.next_format_generic()?;

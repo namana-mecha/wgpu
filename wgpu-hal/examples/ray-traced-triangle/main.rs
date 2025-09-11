@@ -245,6 +245,7 @@ impl<A: hal::Api> Example<A> {
             backend_options: wgpu_types::BackendOptions {
                 dx12: Dx12BackendOptions {
                     shader_compiler: wgpu_types::Dx12Compiler::default_dynamic_dxc(),
+                    ..Default::default()
                 },
                 ..Default::default()
             },
@@ -273,7 +274,7 @@ impl<A: hal::Api> Example<A> {
         };
         let surface_caps = unsafe { adapter.surface_capabilities(&surface) }
             .expect("Surface doesn't support presentation");
-        log::info!("Surface caps: {:#?}", surface_caps);
+        log::info!("Surface caps: {surface_caps:#?}");
 
         let hal::OpenDevice { device, queue } = unsafe {
             adapter
@@ -607,10 +608,13 @@ impl<A: hal::Api> Example<A> {
         let texture_view = unsafe { device.create_texture_view(&texture, &view_desc).unwrap() };
 
         let bind_group = {
-            let buffer_binding = hal::BufferBinding {
-                buffer: &uniform_buffer,
-                offset: 0,
-                size: None,
+            let buffer_binding = unsafe {
+                // SAFETY: The size matches the buffer allocation.
+                hal::BufferBinding::new_unchecked(
+                    &uniform_buffer,
+                    0,
+                    wgpu_types::BufferSize::new_unchecked(uniforms_size as u64),
+                )
             };
             let texture_binding = hal::TextureBinding {
                 view: &texture_view,
@@ -623,6 +627,7 @@ impl<A: hal::Api> Example<A> {
                 samplers: &[],
                 textures: &[texture_binding],
                 acceleration_structures: &[&tlas],
+                external_textures: &[],
                 entries: &[
                     hal::BindGroupEntry {
                         binding: 0,

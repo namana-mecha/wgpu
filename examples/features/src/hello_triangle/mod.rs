@@ -10,7 +10,10 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     size.width = size.width.max(1);
     size.height = size.height.max(1);
 
-    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::from_env_or_default());
+    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+        backends: wgpu_types::Backends::GLUTIN,
+        ..Default::default()
+    });
 
     let surface = instance.create_surface(&window).unwrap();
     let adapter = instance
