@@ -114,6 +114,7 @@ impl Instance {
         init(hal::api::Dx12, instance_desc, &mut instance_per_backend);
         #[cfg(gles)]
         init(hal::api::Gles, instance_desc, &mut instance_per_backend);
+        init(hal::api::Glutin, instance_desc, &mut instance_per_backend);
 
         Self {
             name: name.to_string(),

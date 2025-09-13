@@ -27,3 +27,8 @@ impl HalApi for hal::api::Dx12 {
 impl HalApi for hal::api::Gles {
     const VARIANT: Backend = Backend::Gl;
 }
+
+#[cfg(gles)]
+impl HalApi for hal::api::Glutin {
+    const VARIANT: Backend = Backend::Glutin;
+}
