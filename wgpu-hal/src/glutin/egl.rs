@@ -218,7 +218,7 @@ impl Surface {
         _suf_texture: super::Texture,
         context: &AdapterContext,
     ) -> Result<(), crate::SurfaceError> {
-        log::error!("egl::Surface::present()");
+        log::info!("egl::Surface::present()");
         let gl = unsafe { context.gl.lock() };
         let swapchain = self.swapchain.read();
         let sc = swapchain.as_ref().unwrap();
