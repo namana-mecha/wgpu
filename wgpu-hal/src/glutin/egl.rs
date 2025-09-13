@@ -26,11 +26,13 @@ use crate::{
 
 pub struct AdapterContext {
     pub gl: Mutex<ManuallyDrop<glow::Context>>,
+    pub display: Mutex<glutin::api::egl::display::Display>,
 }
 impl AdapterContext {
-    pub fn new(gl: glow::Context) -> Arc<Self> {
+    pub fn new(gl: glow::Context, display: glutin::api::egl::display::Display) -> Arc<Self> {
         Arc::new(Self {
             gl: Mutex::new(ManuallyDrop::new(gl)),
+            display: Mutex::new(display),
         })
     }
 }
@@ -121,16 +123,6 @@ impl crate::Instance for Instance {
     ) -> Result<<Self::A as crate::Api>::Surface, crate::InstanceError> {
         log::error!("Instance::create_surface(display_handle: ?, window_handle: ?)");
         let inner = self.inner.lock();
-        let display = glutin::display::Display::Egl(inner.display.clone());
-        let config = glutin::config::Config::Egl(inner.config.clone());
-
-        let surface_attributes_builder = SurfaceAttributesBuilder::<WindowSurface>::new();
-        let surface_attributes = surface_attributes_builder.build(
-            window_handle,
-            NonZero::new(1280).unwrap(),
-            NonZero::new(720).unwrap(),
-        );
-        unsafe { display.create_window_surface(&config, &surface_attributes) };
 
         Ok(Surface {
             config: inner.config.clone(),
@@ -156,7 +148,7 @@ impl crate::Instance for Instance {
                 .create_context(&inner.config, &context_attributes)
                 .expect("couldn't create context")
         };
-        let current_context = unsafe {
+        let _ = unsafe {
             not_current_context
                 .make_current_surfaceless()
                 .expect("couldn't make current")
@@ -167,33 +159,10 @@ impl crate::Instance for Instance {
             })
         };
 
-        // vec![crate::ExposedAdapter {
-        //     info: AdapterInfo {
-        //         name: format!("{:?}", inner.config.api()),
-        //         vendor: Default::default(),
-        //         device: Default::default(),
-        //         device_type: wgt::DeviceType::IntegratedGpu,
-        //         driver: "etnaviv".into(),
-        //         driver_info: "something".into(),
-        //         backend: Backend::Glutin,
-        //     },
-        //     features: wgt::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES,
-        //     capabilities: Capabilities {
-        //         limits: wgt::Limits::default(),
-        //         alignments: Alignments {
-        //             buffer_copy_offset: NonZero::new(1).unwrap(),
-        //             buffer_copy_pitch: NonZero::new(1).unwrap(),
-        //             uniform_bounds_check_alignment: NonZero::new(1).unwrap(),
-        //             raw_tlas_instance_size: Default::default(),
-        //             ray_tracing_scratch_buffer_alignment: Default::default(),
-        //         },
-        //         downlevel: wgt::DownlevelCapabilities::default(),
-        //     },
-        //     adapter: super::Adapter::expose(AdapterContext { gl: Mutex::new(gl) }),
-        // }]
         unsafe {
             super::Adapter::expose(AdapterContext {
                 gl: Mutex::new(ManuallyDrop::new(gl)),
+                display: Mutex::new(inner.display.clone()),
             })
         }
         .into_iter()
@@ -287,16 +256,13 @@ impl Surface {
     unsafe fn unconfigure_impl(
         &self,
         device: &super::Device,
-    ) -> Option<(
-        glutin::surface::Surface<WindowSurface>,
-        Option<*mut raw::c_void>,
-    )> {
+    ) -> Option<glutin::surface::Surface<WindowSurface>> {
         let gl = &device.shared.context.gl.lock();
         match self.swapchain.write().take() {
             Some(sc) => {
                 unsafe { gl.delete_renderbuffer(sc.renderbuffer) };
                 unsafe { gl.delete_framebuffer(sc.framebuffer) };
-                Some((sc.surface, sc.wl_window))
+                Some(sc.surface)
             }
             None => None,
         }
@@ -315,7 +281,70 @@ impl crate::Surface for Surface {
         device: &super::Device,
         config: &crate::SurfaceConfiguration,
     ) -> Result<(), crate::SurfaceError> {
-        // TODO
+        let surface = match unsafe { self.unconfigure_impl(device) } {
+            Some(surface) => surface,
+            None => {
+                let display = device.shared.context.display.lock();
+                let display = glutin::display::Display::Egl(display.clone());
+                let surface_attributes_builder = SurfaceAttributesBuilder::<WindowSurface>::new();
+                let surface_attributes = surface_attributes_builder.build(
+                    self.raw_window_handle,
+                    NonZero::new(config.extent.width).unwrap(),
+                    NonZero::new(config.extent.height).unwrap(),
+                );
+                let config = glutin::config::Config::Egl(self.config.clone());
+                let surface = unsafe {
+                    display
+                        .create_window_surface(&config, &surface_attributes)
+                        .expect("couldn't create surface")
+                };
+                surface
+            }
+        };
+
+        let format_desc = device.shared.describe_texture_format(config.format);
+        let gl = &device.shared.context.gl.lock();
+        let renderbuffer = unsafe { gl.create_renderbuffer() }.map_err(|error| {
+            log::error!("Internal swapchain renderbuffer creation failed: {error}");
+            crate::DeviceError::OutOfMemory
+        })?;
+        unsafe { gl.bind_renderbuffer(glow::RENDERBUFFER, Some(renderbuffer)) };
+        unsafe {
+            gl.renderbuffer_storage(
+                glow::RENDERBUFFER,
+                format_desc.internal,
+                config.extent.width as _,
+                config.extent.height as _,
+            )
+        };
+        let framebuffer = unsafe { gl.create_framebuffer() }.map_err(|error| {
+            log::error!("Internal swapchain framebuffer creation failed: {error}");
+            crate::DeviceError::OutOfMemory
+        })?;
+        unsafe { gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(framebuffer)) };
+        unsafe {
+            gl.framebuffer_renderbuffer(
+                glow::READ_FRAMEBUFFER,
+                glow::COLOR_ATTACHMENT0,
+                glow::RENDERBUFFER,
+                Some(renderbuffer),
+            )
+        };
+        unsafe { gl.bind_renderbuffer(glow::RENDERBUFFER, None) };
+        unsafe { gl.bind_framebuffer(glow::READ_FRAMEBUFFER, None) };
+
+        let mut swapchain = self.swapchain.write();
+        *swapchain = Some(Swapchain {
+            surface,
+            wl_window: None,
+            renderbuffer,
+            framebuffer,
+            extent: config.extent,
+            format: config.format,
+            format_desc,
+            sample_type: wgt::TextureSampleType::Float { filterable: false },
+        });
+
         Ok(())
     }
 
