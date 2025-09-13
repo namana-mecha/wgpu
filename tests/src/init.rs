@@ -46,6 +46,7 @@ pub fn initialize_instance(backends: wgpu::Backends, force_fxc: bool) -> Instanc
             },
             gl: wgpu::GlBackendOptions { gles_minor_version },
         },
+        display: None,
     })
 }
 
