@@ -1,6 +1,7 @@
 use glow::{HasContext, Version};
 use glutin::{
     config::{ConfigSurfaceTypes, ConfigTemplateBuilder, GlConfig},
+    context::AsRawContext,
     display::{self, GetGlDisplay},
     prelude::{GlDisplay, NotCurrentGlContext, PossiblyCurrentGlContext},
     surface::{PbufferSurface, SurfaceAttributesBuilder, WindowSurface},
@@ -27,14 +28,15 @@ use crate::{
 pub struct AdapterContext {
     pub gl: Mutex<ManuallyDrop<glow::Context>>,
     pub display: Mutex<glutin::api::egl::display::Display>,
+    pub context: Mutex<glutin::api::egl::context::PossiblyCurrentContext>,
 }
 impl AdapterContext {
-    pub fn new(gl: glow::Context, display: glutin::api::egl::display::Display) -> Arc<Self> {
-        Arc::new(Self {
-            gl: Mutex::new(ManuallyDrop::new(gl)),
-            display: Mutex::new(display),
-        })
-    }
+    // pub fn new(gl: glow::Context, display: glutin::api::egl::display::Display) -> Arc<Self> {
+    //     Arc::new(Self {
+    //         gl: Mutex::new(ManuallyDrop::new(gl)),
+    //         display: Mutex::new(display),
+    //     })
+    // }
 }
 
 // struct EglContextLock<'a> {
@@ -148,7 +150,7 @@ impl crate::Instance for Instance {
                 .create_context(&inner.config, &context_attributes)
                 .expect("couldn't create context")
         };
-        let _ = unsafe {
+        let context = unsafe {
             not_current_context
                 .make_current_surfaceless()
                 .expect("couldn't make current")
@@ -163,6 +165,7 @@ impl crate::Instance for Instance {
             super::Adapter::expose(AdapterContext {
                 gl: Mutex::new(ManuallyDrop::new(gl)),
                 display: Mutex::new(inner.display.clone()),
+                context: Mutex::new(context),
             })
         }
         .into_iter()
@@ -281,6 +284,7 @@ impl crate::Surface for Surface {
         device: &super::Device,
         config: &crate::SurfaceConfiguration,
     ) -> Result<(), crate::SurfaceError> {
+        println!("Surface::configure(device: ?, config: {:?})", config);
         let surface = match unsafe { self.unconfigure_impl(device) } {
             Some(surface) => surface,
             None => {
@@ -298,6 +302,12 @@ impl crate::Surface for Surface {
                         .create_window_surface(&config, &surface_attributes)
                         .expect("couldn't create surface")
                 };
+                device
+                    .shared
+                    .context
+                    .context
+                    .lock()
+                    .make_current(&surface.into());
                 surface
             }
         };
