@@ -414,6 +414,7 @@ impl super::Queue {
                         };
                     }
                     (None, None) => {
+                        // from gles, we can ignore
                         todo!()
                     }
                 }
@@ -1824,45 +1825,44 @@ impl crate::Queue for super::Queue {
         _surface_textures: &[&super::Texture],
         (signal_fence, signal_value): (&mut super::Fence, crate::FenceValue),
     ) -> Result<(), crate::DeviceError> {
-        todo!()
-        // let shared = Arc::clone(&self.shared);
-        // let gl = &shared.context.lock();
-        // for cmd_buf in command_buffers.iter() {
-        //     // The command encoder assumes a default state when encoding the command buffer.
-        //     // Always reset the state between command_buffers to reflect this assumption. Do
-        //     // this at the beginning of the loop in case something outside of wgpu modified
-        //     // this state prior to commit.
-        //     unsafe { self.reset_state(gl) };
-        //     if let Some(ref label) = cmd_buf.label {
-        //         if self
-        //             .shared
-        //             .private_caps
-        //             .contains(PrivateCapabilities::DEBUG_FNS)
-        //         {
-        //             unsafe { gl.push_debug_group(glow::DEBUG_SOURCE_APPLICATION, DEBUG_ID, label) };
-        //         }
-        //     }
+        let shared = Arc::clone(&self.shared);
+        let gl = &shared.context.gl.lock().expect("couldn't acquire gl context lock");
+        for cmd_buf in command_buffers.iter() {
+            // The command encoder assumes a default state when encoding the command buffer.
+            // Always reset the state between command_buffers to reflect this assumption. Do
+            // this at the beginning of the loop in case something outside of wgpu modified
+            // this state prior to commit.
+            unsafe { self.reset_state(gl) };
+            if let Some(ref label) = cmd_buf.label {
+                if self
+                    .shared
+                    .private_caps
+                    .contains(PrivateCapabilities::DEBUG_FNS)
+                {
+                    unsafe { gl.push_debug_group(glow::DEBUG_SOURCE_APPLICATION, DEBUG_ID, label) };
+                }
+            }
 
-        //     for command in cmd_buf.commands.iter() {
-        //         unsafe { self.process(gl, command, &cmd_buf.data_bytes, &cmd_buf.queries) };
-        //     }
+            for command in cmd_buf.commands.iter() {
+                unsafe { self.process(gl, command, &cmd_buf.data_bytes, &cmd_buf.queries) };
+            }
 
-        //     if cmd_buf.label.is_some()
-        //         && self
-        //             .shared
-        //             .private_caps
-        //             .contains(PrivateCapabilities::DEBUG_FNS)
-        //     {
-        //         unsafe { gl.pop_debug_group() };
-        //     }
-        // }
+            if cmd_buf.label.is_some()
+                && self
+                    .shared
+                    .private_caps
+                    .contains(PrivateCapabilities::DEBUG_FNS)
+            {
+                unsafe { gl.pop_debug_group() };
+            }
+        }
 
-        // signal_fence.maintain(gl);
-        // let sync = unsafe { gl.fence_sync(glow::SYNC_GPU_COMMANDS_COMPLETE, 0) }
-        //     .map_err(|_| crate::DeviceError::OutOfMemory)?;
-        // signal_fence.pending.push((signal_value, sync));
+        signal_fence.maintain(gl);
+        let sync = unsafe { gl.fence_sync(glow::SYNC_GPU_COMMANDS_COMPLETE, 0) }
+            .map_err(|_| crate::DeviceError::OutOfMemory)?;
+        signal_fence.pending.push((signal_value, sync));
 
-        // Ok(())
+        Ok(())
     }
 
     unsafe fn present(
@@ -1871,7 +1871,6 @@ impl crate::Queue for super::Queue {
         texture: super::Texture,
     ) -> Result<(), crate::SurfaceError> {
         todo!()
-        // TODO
         // unsafe { surface.present(texture, &self.shared.context) }
     }
 
