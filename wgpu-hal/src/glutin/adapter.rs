@@ -1,7 +1,6 @@
-use std::{
-    mem::ManuallyDrop,
-    sync::{Arc, Mutex},
-};
+use std::{mem::ManuallyDrop, sync::Arc};
+
+use parking_lot::Mutex;
 
 use glow::HasContext;
 use glutin::{display::GetGlDisplay, prelude::GlDisplay};
@@ -13,7 +12,7 @@ use std::sync::atomic::AtomicU8;
 use wgt::AstcChannel;
 
 use crate::auxil::db;
-use crate::gles::ShaderClearProgram;
+use crate::glutin::ShaderClearProgram;
 
 // https://webgl2fundamentals.org/webgl/lessons/webgl-data-textures.html
 
@@ -202,7 +201,7 @@ impl super::Adapter {
     pub(super) unsafe fn expose(
         context: super::AdapterContext,
     ) -> Option<crate::ExposedAdapter<super::Api>> {
-        let gl = context.gl.lock().unwrap();
+        let gl = context.gl.lock();
         let extensions = gl.supported_extensions();
 
         let (vendor_const, renderer_const) = if extensions.contains("WEBGL_debug_renderer_info") {
@@ -944,7 +943,7 @@ impl crate::Adapter for super::Adapter {
         _limits: &wgt::Limits,
         _memory_hints: &wgt::MemoryHints,
     ) -> Result<crate::OpenDevice<super::Api>, crate::DeviceError> {
-        let gl = &self.shared.context.lock();
+        let gl = &self.shared.context.gl.lock();
         unsafe { gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1) };
         unsafe { gl.pixel_store_i32(glow::PACK_ALIGNMENT, 1) };
         let main_vao =

@@ -1,10 +1,18 @@
 use core::ptr::NonNull;
-use std::{cmp::max, ptr, sync::{atomic::Ordering, Arc, Mutex}};
+use std::{
+    cmp::max,
+    ptr,
+    sync::{atomic::Ordering, Arc, Mutex},
+};
 
 use arrayvec::ArrayVec;
 use glow::HasContext;
 
-use crate::{auxil::map_naga_stage, glutin::{conv, Device, PrivateCapabilities}, AtomicFenceValue};
+use crate::{
+    auxil::map_naga_stage,
+    glutin::{conv, Device, PrivateCapabilities},
+    AtomicFenceValue,
+};
 
 type ShaderStage<'a> = (
     naga::ShaderStage,
@@ -99,7 +107,6 @@ impl CompilationContext<'_> {
         *self.push_constant_items = reflection_info.push_constant_items;
     }
 }
-
 
 impl super::Device {
     /// # Safety
@@ -313,7 +320,7 @@ impl super::Device {
             .shared
             .program_cache
             .try_lock()
-            .expect("Couldn't acquire program_cache lock");
+            .expect("couldn't acquire program_cache lock");
         // This guard ensures that we can't accidentally destroy a program whilst we're about to reuse it
         // The only place that destroys a pipeline is also locking on `program_cache`
         let program = guard
@@ -527,7 +534,7 @@ impl crate::Device for Device {
             });
         }
 
-        let gl = &self.shared.context.gl.lock().expect("couldn't acquire gl context lock");
+        let gl = &self.shared.context.gl.lock();
 
         let target = if desc.usage.contains(crate::BufferUses::INDEX) {
             glow::ELEMENT_ARRAY_BUFFER
@@ -630,7 +637,7 @@ impl crate::Device for Device {
     unsafe fn destroy_buffer(&self, buffer: <Self::A as crate::Api>::Buffer) {
         println!("Device::destroy_buffer(buffer: ?)");
         if let Some(raw) = buffer.raw {
-            let gl = &self.shared.context.gl.lock().expect("couldn't acqure gl context lock");
+            let gl = &self.shared.context.gl.lock();
             unsafe { gl.delete_buffer(raw) };
         }
 
@@ -656,7 +663,7 @@ impl crate::Device for Device {
                 slice.as_mut_ptr()
             }
             Some(raw) => {
-                let gl = &self.shared.context.gl.lock().expect("couldn't acquire gl context lock");
+                let gl = &self.shared.context.gl.lock();
                 unsafe { gl.bind_buffer(buffer.target, Some(raw)) };
                 let ptr = if let Some(ref map_read_allocation) = buffer.data {
                     let mut guard = map_read_allocation.lock().unwrap();
@@ -692,7 +699,7 @@ impl crate::Device for Device {
         println!("Device::unmap_buffer(buffer: ?)");
         if let Some(raw) = buffer.raw {
             if buffer.data.is_none() {
-                let gl = &self.shared.context.gl.lock().expect("couldn't acquire gl context lock");
+                let gl = &self.shared.context.gl.lock();
                 unsafe { gl.bind_buffer(buffer.target, Some(raw)) };
                 unsafe { gl.unmap_buffer(buffer.target) };
                 unsafe { gl.bind_buffer(buffer.target, None) };
@@ -708,7 +715,7 @@ impl crate::Device for Device {
         println!("Device::flush_mapped_ranges(buffer: ?, ranges: ...)");
         if let Some(raw) = buffer.raw {
             if buffer.data.is_none() {
-                let gl = &self.shared.context.gl.lock().expect("couldn't acquire gl context lock");
+                let gl = &self.shared.context.gl.lock();
                 unsafe { gl.bind_buffer(buffer.target, Some(raw)) };
                 for range in ranges {
                     let offset_of_current_mapping =
@@ -741,7 +748,7 @@ impl crate::Device for Device {
         desc: &crate::TextureDescriptor,
     ) -> Result<<Self::A as crate::Api>::Texture, crate::DeviceError> {
         println!("Device::create_texture(desc: {:?})", desc);
-        let gl = &self.shared.context.gl.lock().expect("couldn't acquire gl context lock");
+        let gl = &self.shared.context.gl.lock();
 
         let render_usage = crate::TextureUses::COLOR_TARGET
             | crate::TextureUses::DEPTH_STENCIL_WRITE
@@ -975,7 +982,7 @@ impl crate::Device for Device {
     unsafe fn destroy_texture(&self, texture: <Self::A as crate::Api>::Texture) {
         println!("Device::destroy_texture(texture: ?)");
         if texture.drop_guard.is_none() {
-            let gl = &self.shared.context.gl.lock().expect("couldn't acquire gl context lock");
+            let gl = &self.shared.context.gl.lock();
             match texture.inner {
                 super::TextureInner::Renderbuffer { raw, .. } => {
                     unsafe { gl.delete_renderbuffer(raw) };
@@ -1028,7 +1035,7 @@ impl crate::Device for Device {
         desc: &crate::SamplerDescriptor,
     ) -> Result<<Self::A as crate::Api>::Sampler, crate::DeviceError> {
         println!("Device::create_sampler(desc: {:?})", desc);
-        let gl = &self.shared.context.gl.lock().expect("couldn't acquire gl context lock");
+        let gl = &self.shared.context.gl.lock();
 
         let raw = unsafe { gl.create_sampler().unwrap() };
 
@@ -1123,7 +1130,7 @@ impl crate::Device for Device {
 
     unsafe fn destroy_sampler(&self, sampler: <Self::A as crate::Api>::Sampler) {
         println!("Device::destroy_sampler(sampler: ?)");
-        let gl = &self.shared.context.gl.lock().expect("couldn't acquire gl context lock");
+        let gl = &self.shared.context.gl.lock();
         unsafe { gl.delete_sampler(sampler.raw) };
         self.counters.samplers.sub(1);
     }
@@ -1385,7 +1392,7 @@ impl crate::Device for Device {
         >,
     ) -> Result<<Self::A as crate::Api>::RenderPipeline, crate::PipelineError> {
         println!("Device::create_render_pipeline(desc: ?)");
-        let gl = &self.shared.context.gl.lock().expect("couldn't acquire gl context lock");
+        let gl = &self.shared.context.gl.lock();
         let mut shaders = ArrayVec::new();
         shaders.push((naga::ShaderStage::Vertex, &desc.vertex_stage));
         if let Some(ref fs) = desc.fragment_stage {
@@ -1460,7 +1467,7 @@ impl crate::Device for Device {
         // - `RenderPipeline` can't be cloned
         // - The only place that we can get a new reference is during `program_cache.lock()`
         if Arc::strong_count(&pipeline.inner) == 2 {
-            let gl = &self.shared.context.gl.lock().expect("couldn't acquire gl context lock");
+            let gl = &self.shared.context.gl.lock();
             let mut program_cache = self.shared.program_cache.lock();
             program_cache.retain(|_, v| match *v {
                 Ok(ref p) => p.program != pipeline.inner.program,
@@ -1481,7 +1488,7 @@ impl crate::Device for Device {
         >,
     ) -> Result<<Self::A as crate::Api>::ComputePipeline, crate::PipelineError> {
         println!("Device::create_compute_pipeline(desc: ?)");
-        let gl = &self.shared.context.gl.lock().expect("couldn't acquire gl context lock");
+        let gl = &self.shared.context.gl.lock();
         let mut shaders = ArrayVec::new();
         shaders.push((naga::ShaderStage::Compute, &desc.stage));
         let inner = unsafe { self.create_pipeline(gl, shaders, desc.layout, desc.label, None) }?;
@@ -1498,7 +1505,7 @@ impl crate::Device for Device {
         // - `ComputePipeline` can't be cloned
         // - The only place that we can get a new reference is during `program_cache.lock()`
         if Arc::strong_count(&pipeline.inner) == 2 {
-            let gl = &self.shared.context.gl.lock().expect("couldn't acquire gl context lock");
+            let gl = &self.shared.context.gl.lock();
             let mut program_cache = self.shared.program_cache.lock();
             program_cache.retain(|_, v| match *v {
                 Ok(ref p) => p.program != pipeline.inner.program,
@@ -1535,7 +1542,7 @@ impl crate::Device for Device {
 
     unsafe fn destroy_query_set(&self, set: <Self::A as crate::Api>::QuerySet) {
         println!("Device::destroy_query_set(set: ?)");
-        let gl = &self.shared.context.gl.lock().expect("couldn't acquire gl context lock");
+        let gl = &self.shared.context.gl.lock();
         for &query in set.queries.iter() {
             unsafe { gl.delete_query(query) };
         }
@@ -1553,7 +1560,7 @@ impl crate::Device for Device {
 
     unsafe fn destroy_fence(&self, fence: <Self::A as crate::Api>::Fence) {
         println!("Device::destroy_fence(fence: ?)");
-        let gl = &self.shared.context.gl.lock().expect("couldn't acquire gl context lock");
+        let gl = &self.shared.context.gl.lock();
         for (_, sync) in fence.pending {
             unsafe { gl.delete_sync(sync) };
         }
@@ -1576,7 +1583,7 @@ impl crate::Device for Device {
         timeout_ms: u32,
     ) -> Result<bool, crate::DeviceError> {
         if fence.last_completed.load(Ordering::Relaxed) < wait_value {
-            let gl = &self.shared.context.gl.lock().expect("couldn't acquire gl context lock");
+            let gl = &self.shared.context.gl.lock();
             // MAX_CLIENT_WAIT_TIMEOUT_WEBGL is:
             // - 1s in Gecko https://searchfox.org/mozilla-central/rev/754074e05178e017ef6c3d8e30428ffa8f1b794d/dom/canvas/WebGLTypes.h#1386
             // - 0 in WebKit https://github.com/WebKit/WebKit/blob/4ef90d4672ca50267c0971b85db403d9684508ea/Source/WebCore/html/canvas/WebGL2RenderingContext.cpp#L110

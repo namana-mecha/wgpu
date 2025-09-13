@@ -1,4 +1,4 @@
-use glow::HasContext;
+use glow::{HasContext, Version};
 use glutin::{
     config::{ConfigSurfaceTypes, ConfigTemplateBuilder, GlConfig},
     display::{self, GetGlDisplay},
@@ -6,13 +6,14 @@ use glutin::{
     surface::{PbufferSurface, SurfaceAttributesBuilder, WindowSurface},
 };
 use parking_lot::MutexGuard;
+use parking_lot::{Mutex, RwLock};
 use raw_window_handle::{RawDisplayHandle, RawWindowHandle, WindowHandle};
 use std::{
     ffi::{CStr, CString},
     mem::ManuallyDrop,
     num::{NonZero, NonZeroI32, NonZeroU32},
     os::raw,
-    sync::{Arc, Mutex, RwLock},
+    sync::Arc,
     time::Duration,
     vec::Vec,
 };
@@ -90,7 +91,9 @@ impl crate::Instance for Instance {
             .expect("couldn't create glutin display")
         };
 
-        let template_builder = ConfigTemplateBuilder::new().prefer_hardware_accelerated(Some(true));
+        let template_builder = ConfigTemplateBuilder::new()
+            .prefer_hardware_accelerated(Some(true))
+            .with_api(glutin::config::Api::GLES3);
         let template = template_builder.build();
         let config = unsafe {
             display
@@ -117,7 +120,7 @@ impl crate::Instance for Instance {
         window_handle: RawWindowHandle,
     ) -> Result<<Self::A as crate::Api>::Surface, crate::InstanceError> {
         log::error!("Instance::create_surface(display_handle: ?, window_handle: ?)");
-        let inner = self.inner.lock().unwrap();
+        let inner = self.inner.lock();
         let display = glutin::display::Display::Egl(inner.display.clone());
         let config = glutin::config::Config::Egl(inner.config.clone());
 
@@ -141,9 +144,12 @@ impl crate::Instance for Instance {
         &self,
         _surface_hint: Option<&<Self::A as crate::Api>::Surface>,
     ) -> Vec<crate::ExposedAdapter<Self::A>> {
-        let context_attributes_builder = glutin::context::ContextAttributesBuilder::default();
+        let context_attributes_builder = glutin::context::ContextAttributesBuilder::default()
+            .with_context_api(glutin::context::ContextApi::Gles(Some(
+                glutin::context::Version::new(3, 0),
+            )));
         let context_attributes = context_attributes_builder.build(None);
-        let inner = self.inner.lock().expect("couldn't aquire lock");
+        let inner = self.inner.lock();
         let not_current_context = unsafe {
             inner
                 .display
@@ -160,7 +166,6 @@ impl crate::Instance for Instance {
                 inner.display.get_proc_address(&CString::new(s).expect(s)) as *const _
             })
         };
-        let _ = current_context.make_not_current();
 
         // vec![crate::ExposedAdapter {
         //     info: AdapterInfo {
@@ -230,8 +235,8 @@ impl Surface {
         _suf_texture: super::Texture,
         context: &AdapterContext,
     ) -> Result<(), crate::SurfaceError> {
-        let gl = unsafe { context.gl.lock().unwrap() };
-        let swapchain = self.swapchain.read().unwrap();
+        let gl = unsafe { context.gl.lock() };
+        let swapchain = self.swapchain.read();
         let sc = swapchain.as_ref().unwrap();
 
         unsafe { gl.disable(glow::SCISSOR_TEST) };
@@ -286,8 +291,8 @@ impl Surface {
         glutin::surface::Surface<WindowSurface>,
         Option<*mut raw::c_void>,
     )> {
-        let gl = &device.shared.context.gl.lock().unwrap();
-        match self.swapchain.write().unwrap().take() {
+        let gl = &device.shared.context.gl.lock();
+        match self.swapchain.write().take() {
             Some(sc) => {
                 unsafe { gl.delete_renderbuffer(sc.renderbuffer) };
                 unsafe { gl.delete_framebuffer(sc.framebuffer) };
@@ -341,7 +346,7 @@ impl crate::Surface for Surface {
         _timeout_ms: Option<Duration>, //TODO
         _fence: &super::Fence,
     ) -> Result<Option<crate::AcquiredSurfaceTexture<super::Api>>, crate::SurfaceError> {
-        let swapchain = self.swapchain.read().unwrap();
+        let swapchain = self.swapchain.read();
         let sc = swapchain.as_ref().unwrap();
         let texture = super::Texture {
             inner: super::TextureInner::Renderbuffer {
