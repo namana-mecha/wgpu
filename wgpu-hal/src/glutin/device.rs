@@ -670,8 +670,7 @@ impl crate::Device for Device {
                     let slice = guard.as_mut_slice();
 
                     unsafe {
-                        todo!();
-                        // self.shared.get_buffer_sub_data(gl, buffer.target, 0, slice);
+                        self.shared.get_buffer_sub_data(gl, buffer.target, 0, slice);
                     };
                     slice.as_mut_ptr()
                 } else {

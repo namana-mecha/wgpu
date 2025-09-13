@@ -391,13 +391,12 @@ impl super::Queue {
 
                         unsafe { gl.bind_buffer(copy_src_target, Some(src)) };
                         unsafe {
-                            todo!();
-                            // self.shared.get_buffer_sub_data(
-                            //     gl,
-                            //     copy_src_target,
-                            //     copy.src_offset as i32,
-                            //     dst_data,
-                            // )
+                            self.shared.get_buffer_sub_data(
+                                gl,
+                                copy_src_target,
+                                copy.src_offset as i32,
+                                dst_data,
+                            )
                         };
                     }
                     (None, Some(dst)) => {
@@ -1870,8 +1869,7 @@ impl crate::Queue for super::Queue {
         surface: &super::Surface,
         texture: super::Texture,
     ) -> Result<(), crate::SurfaceError> {
-        todo!()
-        // unsafe { surface.present(texture, &self.shared.context) }
+        unsafe { surface.present(texture, &self.shared.context) }
     }
 
     unsafe fn get_timestamp_period(&self) -> f32 {
