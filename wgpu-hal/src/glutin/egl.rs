@@ -1,21 +1,27 @@
+use glow::HasContext;
 use glutin::{
     config::{ConfigSurfaceTypes, ConfigTemplateBuilder, GlConfig},
-    display,
+    display::{self, GetGlDisplay},
     prelude::{GlDisplay, NotCurrentGlContext, PossiblyCurrentGlContext},
-    surface::{PbufferSurface, SurfaceAttributesBuilder},
+    surface::{PbufferSurface, SurfaceAttributesBuilder, WindowSurface},
 };
 use parking_lot::MutexGuard;
-use raw_window_handle::{RawDisplayHandle, RawWindowHandle};
+use raw_window_handle::{RawDisplayHandle, RawWindowHandle, WindowHandle};
 use std::{
     ffi::{CStr, CString},
     mem::ManuallyDrop,
     num::{NonZero, NonZeroI32, NonZeroU32},
-    sync::{Arc, Mutex},
+    os::raw,
+    sync::{Arc, Mutex, RwLock},
+    time::Duration,
     vec::Vec,
 };
 use wgt::{AdapterInfo, Backend, Features, Gles3MinorVersion, SurfaceCapabilities};
 
-use crate::{glutin::Api, Alignments, Capabilities, ExposedAdapter};
+use crate::{
+    glutin::{AdapterShared, Api},
+    Alignments, Capabilities, ExposedAdapter,
+};
 
 pub struct AdapterContext {
     pub gl: Mutex<ManuallyDrop<glow::Context>>,
@@ -58,10 +64,15 @@ impl<'a> Drop for AdapterContextLock<'a> {
 
 #[derive(Debug)]
 struct Inner {
+    #[allow(unused)]
+    version: (i32, i32),
+    supports_native_window: bool,
+    config: glutin::api::egl::config::Config,
     display: glutin::api::egl::display::Display,
 }
 
 pub struct Instance {
+    flags: wgt::InstanceFlags,
     inner: Mutex<Inner>,
 }
 
@@ -69,31 +80,33 @@ impl crate::Instance for Instance {
     type A = super::Api;
 
     unsafe fn init(desc: &crate::InstanceDescriptor) -> Result<Self, crate::InstanceError> {
-        println!("Instance::init(desc: {:?})", desc);
-        let device = glutin::api::egl::device::Device::query_devices()
-            .unwrap()
-            .next()
-            .unwrap();
+        profiling::scope!("Init OpenGL (EGL) Backend");
         let display = unsafe {
             glutin::api::egl::display::Display::new(
-                // &device, None,
                 desc.display
                     .expect("cannot create glutin instance without raw display handle")
                     .as_raw(),
             )
             .expect("couldn't create glutin display")
-            // .expect("couldn't create glutin display")
-            // glutin::display::Display::new(
-            //     desc.display
-            //         .expect("cannot create glutin instance without raw display handle")
-            //         .as_raw(),
-            //     glutin::display::DisplayApiPreference::Egl,
-            // )
-            // .expect("couldn't create glutin display")
         };
 
-        let inner = Inner { display: (display) };
+        let template_builder = ConfigTemplateBuilder::new().prefer_hardware_accelerated(Some(true));
+        let template = template_builder.build();
+        let config = unsafe {
+            display
+                .find_configs(template)
+                .expect("couldn't find configs")
+                .next()
+                .unwrap()
+        };
+        let inner = Inner {
+            display: display,
+            supports_native_window: true,
+            version: (3, 0),
+            config: config,
+        };
         Ok(Self {
+            flags: desc.flags,
             inner: Mutex::new(inner),
         })
     }
@@ -104,41 +117,37 @@ impl crate::Instance for Instance {
         window_handle: RawWindowHandle,
     ) -> Result<<Self::A as crate::Api>::Surface, crate::InstanceError> {
         log::error!("Instance::create_surface(display_handle: ?, window_handle: ?)");
-        Ok(super::Surface {})
+        let inner = self.inner.lock().unwrap();
+        let display = glutin::display::Display::Egl(inner.display.clone());
+        let config = glutin::config::Config::Egl(inner.config.clone());
+
+        let surface_attributes_builder = SurfaceAttributesBuilder::<WindowSurface>::new();
+        let surface_attributes = surface_attributes_builder.build(
+            window_handle,
+            NonZero::new(1280).unwrap(),
+            NonZero::new(720).unwrap(),
+        );
+        unsafe { display.create_window_surface(&config, &surface_attributes) };
+
+        Ok(Surface {
+            config: inner.config.clone(),
+            presentable: inner.supports_native_window,
+            raw_window_handle: window_handle,
+            swapchain: RwLock::new(None),
+        })
     }
 
     unsafe fn enumerate_adapters(
         &self,
         _surface_hint: Option<&<Self::A as crate::Api>::Surface>,
     ) -> Vec<crate::ExposedAdapter<Self::A>> {
-        let template_builder = ConfigTemplateBuilder::new().prefer_hardware_accelerated(Some(true));
-        let template = template_builder.build();
-        let mut output = vec![];
-        let inner = self.inner.lock().expect("couldn't aquire lock");
-        for config in unsafe {
-            inner
-                .display
-                .find_configs(template.clone())
-                .expect("couldn't find configs")
-        } {
-            println!("{:?}", config.config_surface_types());
-        }
-        let config = unsafe {
-            inner
-                .display
-                .find_configs(template)
-                .expect("couldn't find configs")
-                .next()
-                .unwrap()
-        };
-        let context_attributes_builder = glutin::context::ContextAttributesBuilder::default()
-            .with_debug(true)
-            .with_context_api(glutin::context::ContextApi::Gles(None));
+        let context_attributes_builder = glutin::context::ContextAttributesBuilder::default();
         let context_attributes = context_attributes_builder.build(None);
+        let inner = self.inner.lock().expect("couldn't aquire lock");
         let not_current_context = unsafe {
             inner
                 .display
-                .create_context(&config, &context_attributes)
+                .create_context(&inner.config, &context_attributes)
                 .expect("couldn't create context")
         };
         let current_context = unsafe {
@@ -153,55 +162,144 @@ impl crate::Instance for Instance {
         };
         let _ = current_context.make_not_current();
 
-        output.push(crate::ExposedAdapter {
-            info: AdapterInfo {
-                name: format!("{:?}", config.api()),
-                vendor: Default::default(),
-                device: Default::default(),
-                device_type: wgt::DeviceType::IntegratedGpu,
-                driver: "etnaviv".into(),
-                driver_info: "something".into(),
-                backend: Backend::Glutin,
-            },
-            features: wgt::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES,
-            capabilities: Capabilities {
-                limits: wgt::Limits::default(),
-                alignments: Alignments {
-                    buffer_copy_offset: NonZero::new(1).unwrap(),
-                    buffer_copy_pitch: NonZero::new(1).unwrap(),
-                    uniform_bounds_check_alignment: NonZero::new(1).unwrap(),
-                    raw_tlas_instance_size: Default::default(),
-                    ray_tracing_scratch_buffer_alignment: Default::default(),
-                },
-                downlevel: wgt::DownlevelCapabilities::default(),
-            },
-            adapter: super::Adapter {
-                config: Arc::new(config),
-                context: super::AdapterContext::new(gl),
-            },
-        });
-        output
+        // vec![crate::ExposedAdapter {
+        //     info: AdapterInfo {
+        //         name: format!("{:?}", inner.config.api()),
+        //         vendor: Default::default(),
+        //         device: Default::default(),
+        //         device_type: wgt::DeviceType::IntegratedGpu,
+        //         driver: "etnaviv".into(),
+        //         driver_info: "something".into(),
+        //         backend: Backend::Glutin,
+        //     },
+        //     features: wgt::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES,
+        //     capabilities: Capabilities {
+        //         limits: wgt::Limits::default(),
+        //         alignments: Alignments {
+        //             buffer_copy_offset: NonZero::new(1).unwrap(),
+        //             buffer_copy_pitch: NonZero::new(1).unwrap(),
+        //             uniform_bounds_check_alignment: NonZero::new(1).unwrap(),
+        //             raw_tlas_instance_size: Default::default(),
+        //             ray_tracing_scratch_buffer_alignment: Default::default(),
+        //         },
+        //         downlevel: wgt::DownlevelCapabilities::default(),
+        //     },
+        //     adapter: super::Adapter::expose(AdapterContext { gl: Mutex::new(gl) }),
+        // }]
+        unsafe {
+            super::Adapter::expose(AdapterContext {
+                gl: Mutex::new(ManuallyDrop::new(gl)),
+            })
+        }
+        .into_iter()
+        .collect()
     }
 }
 
 #[derive(Debug)]
+pub struct Swapchain {
+    surface: glutin::surface::Surface<WindowSurface>,
+    wl_window: Option<*mut raw::c_void>,
+    framebuffer: glow::Framebuffer,
+    renderbuffer: glow::Renderbuffer,
+    /// Extent because the window lies
+    extent: wgt::Extent3d,
+    format: wgt::TextureFormat,
+    format_desc: super::TextureFormatDesc,
+    #[allow(unused)]
+    sample_type: wgt::TextureSampleType,
+}
+
+#[derive(Debug)]
 pub struct Surface {
-    // TODO
+    // DONE
     // egl: EglContext,
     // wsi: WindowSystemInterface,
-    // config: khronos_egl::Config,
-    // pub(super) presentable: bool,
-    // raw_window_handle: raw_window_handle::RawWindowHandle,
-    // swapchain: RwLock<Option<Swapchain>>,
-    // srgb_kind: SrgbFrameBufferKind,
+    config: glutin::api::egl::config::Config,
+    pub(super) presentable: bool,
+    raw_window_handle: raw_window_handle::RawWindowHandle,
+    swapchain: RwLock<Option<Swapchain>>,
 }
 
 unsafe impl Send for Surface {}
 unsafe impl Sync for Surface {}
 
-
 impl Surface {
+    pub(super) unsafe fn present(
+        &self,
+        _suf_texture: super::Texture,
+        context: &AdapterContext,
+    ) -> Result<(), crate::SurfaceError> {
+        let gl = unsafe { context.gl.lock().unwrap() };
+        let swapchain = self.swapchain.read().unwrap();
+        let sc = swapchain.as_ref().unwrap();
 
+        unsafe { gl.disable(glow::SCISSOR_TEST) };
+        unsafe { gl.color_mask(true, true, true, true) };
+
+        unsafe { gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, None) };
+        unsafe { gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(sc.framebuffer)) };
+
+        // Note the Y-flipping here. GL's presentation is not flipped,
+        // but main rendering is. Therefore, we Y-flip the output positions
+        // in the shader, and also this blit.
+        unsafe {
+            gl.blit_framebuffer(
+                0,
+                sc.extent.height as i32,
+                sc.extent.width as i32,
+                0,
+                0,
+                0,
+                sc.extent.width as i32,
+                sc.extent.height as i32,
+                glow::COLOR_BUFFER_BIT,
+                glow::NEAREST,
+            )
+        };
+
+        unsafe { gl.bind_framebuffer(glow::READ_FRAMEBUFFER, None) };
+
+        // self.egl
+        //     .instance
+        //     .swap_buffers(self.egl.display, sc.surface)
+        //     .map_err(|e| {
+        //         log::error!("swap_buffers failed: {}", e);
+        //         crate::SurfaceError::Lost
+        //         // TODO: should we unset the current context here?
+        //     })?;
+        // self.egl
+        //     .instance
+        //     .make_current(self.egl.display, None, None, None)
+        //     .map_err(|e| {
+        //         log::error!("make_current(null) failed: {}", e);
+        //         crate::SurfaceError::Lost
+        //     })?;
+
+        Ok(())
+    }
+
+    unsafe fn unconfigure_impl(
+        &self,
+        device: &super::Device,
+    ) -> Option<(
+        glutin::surface::Surface<WindowSurface>,
+        Option<*mut raw::c_void>,
+    )> {
+        let gl = &device.shared.context.gl.lock().unwrap();
+        match self.swapchain.write().unwrap().take() {
+            Some(sc) => {
+                unsafe { gl.delete_renderbuffer(sc.renderbuffer) };
+                unsafe { gl.delete_framebuffer(sc.framebuffer) };
+                Some((sc.surface, sc.wl_window))
+            }
+            None => None,
+        }
+    }
+
+    pub fn supports_srgb(&self) -> bool {
+        true
+    }
 }
 
 impl crate::Surface for Surface {
@@ -209,25 +307,61 @@ impl crate::Surface for Surface {
 
     unsafe fn configure(
         &self,
-        device: &<Self::A as crate::Api>::Device,
+        device: &super::Device,
         config: &crate::SurfaceConfiguration,
     ) -> Result<(), crate::SurfaceError> {
-        todo!()
+        // TODO
+        Ok(())
     }
 
-    unsafe fn unconfigure(&self, device: &<Self::A as crate::Api>::Device) {
-        todo!()
+    unsafe fn unconfigure(&self, device: &super::Device) {
+        // if let Some((surface, wl_window)) = unsafe { self.unconfigure_impl(device) } {
+        //     // self.egl
+        //     //     .instance
+        //     //     .destroy_surface(self.egl.display, surface)
+        //     //     .unwrap();
+
+        //     // TODO: understand
+        //     // if let Some(window) = wl_window {
+        //     //     let library = &self
+        //     //         .wsi
+        //     //         .display_owner
+        //     //         .as_ref()
+        //     //         .expect("unsupported window")
+        //     //         .library;
+        //     //     let wl_egl_window_destroy: libloading::Symbol<WlEglWindowDestroyFun> =
+        //     //         unsafe { library.get(b"wl_egl_window_destroy\0") }.unwrap();
+        //     //     unsafe { wl_egl_window_destroy(window) };
+        //     // }
+        // }
     }
 
     unsafe fn acquire_texture(
         &self,
-        timeout: Option<std::time::Duration>,
-        fence: &<Self::A as crate::Api>::Fence,
-    ) -> Result<Option<crate::AcquiredSurfaceTexture<Self::A>>, crate::SurfaceError> {
-        todo!()
+        _timeout_ms: Option<Duration>, //TODO
+        _fence: &super::Fence,
+    ) -> Result<Option<crate::AcquiredSurfaceTexture<super::Api>>, crate::SurfaceError> {
+        let swapchain = self.swapchain.read().unwrap();
+        let sc = swapchain.as_ref().unwrap();
+        let texture = super::Texture {
+            inner: super::TextureInner::Renderbuffer {
+                raw: sc.renderbuffer,
+            },
+            drop_guard: None,
+            array_layer_count: 1,
+            mip_level_count: 1,
+            format: sc.format,
+            format_desc: sc.format_desc.clone(),
+            copy_size: crate::CopyExtent {
+                width: sc.extent.width,
+                height: sc.extent.height,
+                depth: 1,
+            },
+        };
+        Ok(Some(crate::AcquiredSurfaceTexture {
+            texture,
+            suboptimal: false,
+        }))
     }
-
-    unsafe fn discard_texture(&self, texture: <Self::A as crate::Api>::SurfaceTexture) {
-        todo!()
-    }
+    unsafe fn discard_texture(&self, _texture: super::Texture) {}
 }
