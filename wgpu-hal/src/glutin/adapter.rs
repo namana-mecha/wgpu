@@ -1,8 +1,29 @@
+use std::{
+    mem::ManuallyDrop,
+    sync::{Arc, Mutex},
+};
+
+use glutin::{display::GetGlDisplay, prelude::GlDisplay};
 use wgt::{CompositeAlphaMode, PresentMode, TextureFormat};
 
-use crate::TextureUses;
+use crate::{AtomicFenceValue, TextureUses};
 
-pub struct Adapter {}
+pub struct AdapterContext {
+    pub gl: Mutex<ManuallyDrop<glow::Context>>,
+}
+impl AdapterContext {
+    pub fn new(gl: glow::Context) -> Arc<Self> {
+        Arc::new(Self {
+            gl: Mutex::new(ManuallyDrop::new(gl)),
+        })
+    }
+}
+
+pub struct Adapter {
+    pub config: Arc<glutin::api::egl::config::Config>,
+    pub context: Arc<AdapterContext>,
+}
+
 impl crate::Adapter for Adapter {
     type A = super::Api;
 
@@ -12,12 +33,13 @@ impl crate::Adapter for Adapter {
         limits: &wgt::Limits,
         memory_hints: &wgt::MemoryHints,
     ) -> Result<crate::OpenDevice<Self::A>, crate::DeviceError> {
-        println!(
-            "Adapter::open(features: {:?}, limits: {:?}, memory_hints: {:?})",
-            features, limits, memory_hints
-        );
+        println!("Adapter::open(features: ?, limits: ?, memory_hints: ?)",);
+
         Ok(crate::OpenDevice {
-            device: super::Device {},
+            device: super::Device {
+                counters: Arc::new(Default::default()),
+                context: self.context.clone(),
+            },
             queue: super::Queue {},
         })
     }
@@ -27,7 +49,7 @@ impl crate::Adapter for Adapter {
         format: wgt::TextureFormat,
     ) -> crate::TextureFormatCapabilities {
         println!("Adapter::texture_format_capabilities(format: {:?})", format);
-        todo!()
+        crate::TextureFormatCapabilities::all()
     }
 
     unsafe fn surface_capabilities(

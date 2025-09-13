@@ -1,8 +1,14 @@
 use core::ptr::NonNull;
+use std::sync::{Arc, Mutex};
 
-use super::BindGroupLayout;
+use crate::AtomicFenceValue;
 
-pub struct Device;
+use super::adapter::AdapterContext;
+
+pub struct Device {
+    pub context: Arc<AdapterContext>,
+    pub counters: Arc<wgt::HalCounters>,
+}
 impl crate::Device for Device {
     type A = super::Api;
 
@@ -11,7 +17,7 @@ impl crate::Device for Device {
         desc: &crate::BufferDescriptor,
     ) -> Result<<Self::A as crate::Api>::Buffer, crate::DeviceError> {
         println!("Device::create_buffer(desc: {:?})", desc);
-        Ok(super::Buffer {})
+        Ok(super::Buffer { size: desc.size })
     }
 
     unsafe fn destroy_buffer(&self, buffer: <Self::A as crate::Api>::Buffer) {
@@ -20,6 +26,7 @@ impl crate::Device for Device {
 
     unsafe fn add_raw_buffer(&self, buffer: &<Self::A as crate::Api>::Buffer) {
         println!("Device::add_raw_buffer(buffer: ?)");
+
         todo!()
     }
 
@@ -31,7 +38,9 @@ impl crate::Device for Device {
         println!("Device::map_buffer(buffer: ?, range: {:?})", range);
         let mut mapping = vec![];
         for x in range {
-            mapping.push(x as u8);
+            for _ in 0..buffer.size {
+                mapping.extend(vec![x as u8; 100]);
+            }
         }
         Ok(crate::BufferMapping {
             ptr: NonNull::new(mapping.as_mut_ptr()).unwrap(),
@@ -66,12 +75,11 @@ impl crate::Device for Device {
         desc: &crate::TextureDescriptor,
     ) -> Result<<Self::A as crate::Api>::Texture, crate::DeviceError> {
         println!("Device::create_texture(desc: {:?})", desc);
-        todo!()
+        Ok(super::Texture {})
     }
 
     unsafe fn destroy_texture(&self, texture: <Self::A as crate::Api>::Texture) {
         println!("Device::destroy_texture(texture: ?)");
-        todo!()
     }
 
     unsafe fn add_raw_texture(&self, texture: &<Self::A as crate::Api>::Texture) {
@@ -85,12 +93,11 @@ impl crate::Device for Device {
         desc: &crate::TextureViewDescriptor,
     ) -> Result<<Self::A as crate::Api>::TextureView, crate::DeviceError> {
         println!("Device::create_texture_view(texture: ?, desc: {:?})", desc);
-        todo!()
+        Ok(super::TextureView {})
     }
 
     unsafe fn destroy_texture_view(&self, view: <Self::A as crate::Api>::TextureView) {
         println!("Device::destroy_texture_view(view: ?)");
-        todo!()
     }
 
     unsafe fn create_sampler(
@@ -98,12 +105,11 @@ impl crate::Device for Device {
         desc: &crate::SamplerDescriptor,
     ) -> Result<<Self::A as crate::Api>::Sampler, crate::DeviceError> {
         println!("Device::create_sampler(desc: {:?})", desc);
-        todo!()
+        Ok(super::Sampler {})
     }
 
     unsafe fn destroy_sampler(&self, sampler: <Self::A as crate::Api>::Sampler) {
         println!("Device::destroy_sampler(sampler: ?)");
-        todo!()
     }
 
     unsafe fn create_command_encoder(
@@ -173,7 +179,6 @@ impl crate::Device for Device {
 
     unsafe fn destroy_shader_module(&self, module: <Self::A as crate::Api>::ShaderModule) {
         println!("Device::destroy_shader_module(module: ?)");
-        todo!()
     }
 
     unsafe fn create_render_pipeline(
@@ -236,13 +241,15 @@ impl crate::Device for Device {
     }
 
     unsafe fn create_fence(&self) -> Result<<Self::A as crate::Api>::Fence, crate::DeviceError> {
-        println!("Device::create_fence()");
-        Ok(super::Fence)
+        self.counters.fences.add(1);
+        Ok(super::Fence {
+            last_completed: AtomicFenceValue::new(0),
+            pending: Vec::new(),
+        })
     }
 
     unsafe fn destroy_fence(&self, fence: <Self::A as crate::Api>::Fence) {
         println!("Device::destroy_fence(fence: ?)");
-        todo!()
     }
 
     unsafe fn get_fence_value(

@@ -41,7 +41,6 @@ impl crate::CommandEncoder for CommandEncoder {
         T: Iterator<Item = crate::TextureBarrier<'a, <Self::A as crate::Api>::Texture>>,
     {
         println!("CommandEncoder::transition_textures(barriers: ...)");
-        todo!()
     }
 
     unsafe fn clear_buffer(
@@ -91,7 +90,6 @@ impl crate::CommandEncoder for CommandEncoder {
         T: Iterator<Item = crate::BufferTextureCopy>,
     {
         println!("CommandEncoder::copy_buffer_to_texture(src: ?, dst: ?, regions: ...)");
-        todo!()
     }
 
     unsafe fn copy_texture_to_buffer<T>(

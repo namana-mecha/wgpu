@@ -1,5 +1,5 @@
 mod adapter;
-use adapter::Adapter;
+use adapter::{Adapter, AdapterContext};
 
 mod command;
 use command::{CommandBuffer, CommandEncoder};
@@ -74,11 +74,19 @@ crate::impl_dyn_resource!(
     Surface
 );
 #[derive(Debug)]
-pub struct Fence;
+pub struct Fence {
+    last_completed: crate::AtomicFenceValue,
+    pending: Vec<(crate::FenceValue, glow::Fence)>,
+}
 impl crate::DynFence for Fence {}
 
+unsafe impl Sync for Fence {}
+unsafe impl Send for Fence {}
+
 #[derive(Debug)]
-pub struct Buffer;
+pub struct Buffer {
+    pub size: wgt::BufferAddress,
+}
 impl crate::DynBuffer for Buffer {}
 
 #[derive(Debug)]
