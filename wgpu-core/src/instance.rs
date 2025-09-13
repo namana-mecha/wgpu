@@ -13,6 +13,7 @@ use crate::{
     resource_log, DOWNLEVEL_WARNING_MESSAGE,
 };
 
+use raw_window_handle::DisplayHandle;
 use wgt::{Backend, Backends, PowerPreference};
 
 use thiserror::Error;
@@ -79,6 +80,9 @@ impl Instance {
                         .shader_compiler
                         .clone(),
                     gles_minor_version: instance_desc.backend_options.gl.gles_minor_version,
+                    display: instance_desc
+                        .display
+                        .map(|r| unsafe { DisplayHandle::borrow_raw(r) }),
                 };
 
                 use hal::Instance as _;

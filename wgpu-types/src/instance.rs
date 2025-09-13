@@ -13,6 +13,13 @@ pub struct InstanceDescriptor {
     pub flags: InstanceFlags,
     /// Options the control the behavior of various backends.
     pub backend_options: BackendOptions,
+
+    /// System platform or compositor connection to connect this `Instance` to.
+    ///
+    /// - On GLES, this is required when intending to present on the platform.
+    /// - On Vulkan, this could be used to skip extensions.
+    // Cannot have the safe borrow variant here...
+    pub display: Option<raw_window_handle::RawDisplayHandle>,
 }
 
 impl Default for InstanceDescriptor {
@@ -21,6 +28,7 @@ impl Default for InstanceDescriptor {
             backends: Backends::all(),
             flags: InstanceFlags::default(),
             backend_options: BackendOptions::default(),
+            display: None,
         }
     }
 }
@@ -42,10 +50,12 @@ impl InstanceDescriptor {
         let backends = self.backends.with_env();
         let flags = self.flags.with_env();
         let backend_options = self.backend_options.with_env();
+        let display = None;
         Self {
             backends,
             flags,
             backend_options,
+            display,
         }
     }
 }

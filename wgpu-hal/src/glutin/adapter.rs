@@ -2,7 +2,7 @@ use wgt::{CompositeAlphaMode, PresentMode, TextureFormat};
 
 use crate::TextureUses;
 
-pub struct Adapter;
+pub struct Adapter {}
 impl crate::Adapter for Adapter {
     type A = super::Api;
 

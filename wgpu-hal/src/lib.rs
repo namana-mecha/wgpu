@@ -274,6 +274,7 @@ pub use dynamic::{
     DynPipelineLayout, DynQuerySet, DynQueue, DynRenderPipeline, DynResource, DynSampler,
     DynShaderModule, DynSurface, DynSurfaceTexture, DynTexture, DynTextureView,
 };
+use raw_window_handle::DisplayHandle;
 
 use std::{
     borrow::{Borrow, Cow},
@@ -1755,6 +1756,7 @@ pub struct InstanceDescriptor<'a> {
     pub flags: wgt::InstanceFlags,
     pub dx12_shader_compiler: wgt::Dx12Compiler,
     pub gles_minor_version: wgt::Gles3MinorVersion,
+    pub display: Option<DisplayHandle<'a>>,
 }
 
 #[derive(Clone, Debug)]
