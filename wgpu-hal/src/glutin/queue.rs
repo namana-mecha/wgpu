@@ -1,4 +1,6 @@
-pub struct Queue;
+use crate::glutin::Queue;
+
+
 impl crate::Queue for Queue {
     type A = super::Api;
 

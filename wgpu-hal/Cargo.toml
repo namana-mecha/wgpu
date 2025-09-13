@@ -136,7 +136,7 @@ log.workspace = true
 # backend: Gles
 bytemuck = { workspace = true, optional = true }
 glow = { workspace = true, optional = true }
-glutin = { workspace = true, optional = true }
+glutin = { workspace = true, features = ["egl", "wayland"] }
 
 [dependencies.wgt]
 package = "wgpu-types"

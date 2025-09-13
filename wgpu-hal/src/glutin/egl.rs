@@ -4,6 +4,7 @@ use glutin::{
     prelude::{GlDisplay, NotCurrentGlContext, PossiblyCurrentGlContext},
     surface::{PbufferSurface, SurfaceAttributesBuilder},
 };
+use parking_lot::MutexGuard;
 use raw_window_handle::{RawDisplayHandle, RawWindowHandle};
 use std::{
     ffi::{CStr, CString},
@@ -15,6 +16,45 @@ use std::{
 use wgt::{AdapterInfo, Backend, Features, Gles3MinorVersion, SurfaceCapabilities};
 
 use crate::{glutin::Api, Alignments, Capabilities, ExposedAdapter};
+
+pub struct AdapterContext {
+    pub gl: Mutex<ManuallyDrop<glow::Context>>,
+}
+impl AdapterContext {
+    pub fn new(gl: glow::Context) -> Arc<Self> {
+        Arc::new(Self {
+            gl: Mutex::new(ManuallyDrop::new(gl)),
+        })
+    }
+}
+
+// struct EglContextLock<'a> {
+//     // instance: &'a Arc<EglInstance>,
+//     display: khronos_egl::Display,
+// }
+
+pub struct AdapterContextLock<'a> {
+    glow: MutexGuard<'a, ManuallyDrop<glow::Context>>,
+    // egl: Option<EglContextLock<'a>>,
+}
+
+impl<'a> std::ops::Deref for AdapterContextLock<'a> {
+    type Target = glow::Context;
+
+    fn deref(&self) -> &Self::Target {
+        &self.glow
+    }
+}
+
+impl<'a> Drop for AdapterContextLock<'a> {
+    fn drop(&mut self) {
+        // if let Some(egl) = self.egl.take() {
+        //     egl.instance
+        //         .make_current(egl.display, None, None, None)
+        //         .unwrap();
+        // }
+    }
+}
 
 #[derive(Debug)]
 struct Inner {
@@ -141,5 +181,53 @@ impl crate::Instance for Instance {
             },
         });
         output
+    }
+}
+
+#[derive(Debug)]
+pub struct Surface {
+    // TODO
+    // egl: EglContext,
+    // wsi: WindowSystemInterface,
+    // config: khronos_egl::Config,
+    // pub(super) presentable: bool,
+    // raw_window_handle: raw_window_handle::RawWindowHandle,
+    // swapchain: RwLock<Option<Swapchain>>,
+    // srgb_kind: SrgbFrameBufferKind,
+}
+
+unsafe impl Send for Surface {}
+unsafe impl Sync for Surface {}
+
+
+impl Surface {
+
+}
+
+impl crate::Surface for Surface {
+    type A = super::Api;
+
+    unsafe fn configure(
+        &self,
+        device: &<Self::A as crate::Api>::Device,
+        config: &crate::SurfaceConfiguration,
+    ) -> Result<(), crate::SurfaceError> {
+        todo!()
+    }
+
+    unsafe fn unconfigure(&self, device: &<Self::A as crate::Api>::Device) {
+        todo!()
+    }
+
+    unsafe fn acquire_texture(
+        &self,
+        timeout: Option<std::time::Duration>,
+        fence: &<Self::A as crate::Api>::Fence,
+    ) -> Result<Option<crate::AcquiredSurfaceTexture<Self::A>>, crate::SurfaceError> {
+        todo!()
+    }
+
+    unsafe fn discard_texture(&self, texture: <Self::A as crate::Api>::SurfaceTexture) {
+        todo!()
     }
 }

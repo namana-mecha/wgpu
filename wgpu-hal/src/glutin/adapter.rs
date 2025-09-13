@@ -6,23 +6,8 @@ use std::{
 use glutin::{display::GetGlDisplay, prelude::GlDisplay};
 use wgt::{CompositeAlphaMode, PresentMode, TextureFormat};
 
-use crate::{AtomicFenceValue, TextureUses};
+use crate::{glutin::Adapter, AtomicFenceValue, TextureUses};
 
-pub struct AdapterContext {
-    pub gl: Mutex<ManuallyDrop<glow::Context>>,
-}
-impl AdapterContext {
-    pub fn new(gl: glow::Context) -> Arc<Self> {
-        Arc::new(Self {
-            gl: Mutex::new(ManuallyDrop::new(gl)),
-        })
-    }
-}
-
-pub struct Adapter {
-    pub config: Arc<glutin::api::egl::config::Config>,
-    pub context: Arc<AdapterContext>,
-}
 
 impl crate::Adapter for Adapter {
     type A = super::Api;

@@ -1,14 +1,9 @@
 use core::ptr::NonNull;
 use std::sync::{Arc, Mutex};
 
-use crate::AtomicFenceValue;
+use crate::{glutin::Device, AtomicFenceValue};
 
-use super::adapter::AdapterContext;
 
-pub struct Device {
-    pub context: Arc<AdapterContext>,
-    pub counters: Arc<wgt::HalCounters>,
-}
 impl crate::Device for Device {
     type A = super::Api;
 
