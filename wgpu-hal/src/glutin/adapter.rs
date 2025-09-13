@@ -194,7 +194,7 @@ impl super::Adapter {
             device_type: inferred_device_type,
             driver: "".to_owned(),
             driver_info: version,
-            backend: wgt::Backend::Gl,
+            backend: wgt::Backend::Glutin,
         }
     }
 

@@ -1100,52 +1100,52 @@ unsafe impl Sync for CommandEncoder {}
 #[cfg(send_sync)]
 unsafe impl Send for CommandEncoder {}
 
-// #[cfg(not(webgl))]
-// fn gl_debug_message_callback(source: u32, gltype: u32, id: u32, severity: u32, message: &str) {
-//     let source_str = match source {
-//         glow::DEBUG_SOURCE_API => "API",
-//         glow::DEBUG_SOURCE_WINDOW_SYSTEM => "Window System",
-//         glow::DEBUG_SOURCE_SHADER_COMPILER => "ShaderCompiler",
-//         glow::DEBUG_SOURCE_THIRD_PARTY => "Third Party",
-//         glow::DEBUG_SOURCE_APPLICATION => "Application",
-//         glow::DEBUG_SOURCE_OTHER => "Other",
-//         _ => unreachable!(),
-//     };
+#[cfg(not(webgl))]
+fn gl_debug_message_callback(source: u32, gltype: u32, id: u32, severity: u32, message: &str) {
+    let source_str = match source {
+        glow::DEBUG_SOURCE_API => "API",
+        glow::DEBUG_SOURCE_WINDOW_SYSTEM => "Window System",
+        glow::DEBUG_SOURCE_SHADER_COMPILER => "ShaderCompiler",
+        glow::DEBUG_SOURCE_THIRD_PARTY => "Third Party",
+        glow::DEBUG_SOURCE_APPLICATION => "Application",
+        glow::DEBUG_SOURCE_OTHER => "Other",
+        _ => unreachable!(),
+    };
 
-//     let log_severity = match severity {
-//         glow::DEBUG_SEVERITY_HIGH => log::Level::Error,
-//         glow::DEBUG_SEVERITY_MEDIUM => log::Level::Warn,
-//         glow::DEBUG_SEVERITY_LOW => log::Level::Info,
-//         glow::DEBUG_SEVERITY_NOTIFICATION => log::Level::Trace,
-//         _ => unreachable!(),
-//     };
+    let log_severity = match severity {
+        glow::DEBUG_SEVERITY_HIGH => log::Level::Error,
+        glow::DEBUG_SEVERITY_MEDIUM => log::Level::Warn,
+        glow::DEBUG_SEVERITY_LOW => log::Level::Info,
+        glow::DEBUG_SEVERITY_NOTIFICATION => log::Level::Trace,
+        _ => unreachable!(),
+    };
 
-//     let type_str = match gltype {
-//         glow::DEBUG_TYPE_DEPRECATED_BEHAVIOR => "Deprecated Behavior",
-//         glow::DEBUG_TYPE_ERROR => "Error",
-//         glow::DEBUG_TYPE_MARKER => "Marker",
-//         glow::DEBUG_TYPE_OTHER => "Other",
-//         glow::DEBUG_TYPE_PERFORMANCE => "Performance",
-//         glow::DEBUG_TYPE_POP_GROUP => "Pop Group",
-//         glow::DEBUG_TYPE_PORTABILITY => "Portability",
-//         glow::DEBUG_TYPE_PUSH_GROUP => "Push Group",
-//         glow::DEBUG_TYPE_UNDEFINED_BEHAVIOR => "Undefined Behavior",
-//         _ => unreachable!(),
-//     };
+    let type_str = match gltype {
+        glow::DEBUG_TYPE_DEPRECATED_BEHAVIOR => "Deprecated Behavior",
+        glow::DEBUG_TYPE_ERROR => "Error",
+        glow::DEBUG_TYPE_MARKER => "Marker",
+        glow::DEBUG_TYPE_OTHER => "Other",
+        glow::DEBUG_TYPE_PERFORMANCE => "Performance",
+        glow::DEBUG_TYPE_POP_GROUP => "Pop Group",
+        glow::DEBUG_TYPE_PORTABILITY => "Portability",
+        glow::DEBUG_TYPE_PUSH_GROUP => "Push Group",
+        glow::DEBUG_TYPE_UNDEFINED_BEHAVIOR => "Undefined Behavior",
+        _ => unreachable!(),
+    };
 
-//     let _ = std::panic::catch_unwind(|| {
-//         log::log!(
-//             log_severity,
-//             "GLES: [{}/{}] ID {} : {}",
-//             source_str,
-//             type_str,
-//             id,
-//             message
-//         );
-//     });
+    let _ = std::panic::catch_unwind(|| {
+        log::log!(
+            log_severity,
+            "GLUTIN: [{}/{}] ID {} : {}",
+            source_str,
+            type_str,
+            id,
+            message
+        );
+    });
 
-//     if cfg!(debug_assertions) && log_severity == log::Level::Error {
-//         // Set canary and continue
-//         crate::VALIDATION_CANARY.add(message.to_string());
-//     }
-// }
+    if cfg!(debug_assertions) && log_severity == log::Level::Error {
+        // Set canary and continue
+        crate::VALIDATION_CANARY.add(message.to_string());
+    }
+}

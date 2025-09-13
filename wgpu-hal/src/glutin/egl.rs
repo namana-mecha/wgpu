@@ -121,7 +121,6 @@ impl crate::Instance for Instance {
         display_handle: RawDisplayHandle,
         window_handle: RawWindowHandle,
     ) -> Result<<Self::A as crate::Api>::Surface, crate::InstanceError> {
-        log::error!("Instance::create_surface(display_handle: ?, window_handle: ?)");
         let inner = self.inner.lock();
 
         Ok(Surface {
@@ -153,11 +152,18 @@ impl crate::Instance for Instance {
                 .make_current_surfaceless()
                 .expect("couldn't make current")
         };
-        let gl = unsafe {
+        let mut gl = unsafe {
             glow::Context::from_loader_function(|s| {
                 inner.display.get_proc_address(&CString::new(s).expect(s)) as *const _
             })
         };
+
+        // if self.flags.contains(wgt::InstanceFlags::VALIDATION) && gl.supports_debug() {
+        if gl.supports_debug() {
+            log::debug!("Enabling GLUTIN debug output");
+            unsafe { gl.enable(glow::DEBUG_OUTPUT) };
+            unsafe { gl.debug_message_callback(super::gl_debug_message_callback) };
+        }
 
         unsafe {
             super::Adapter::expose(AdapterContext {
@@ -204,6 +210,7 @@ impl Surface {
         _suf_texture: super::Texture,
         context: &AdapterContext,
     ) -> Result<(), crate::SurfaceError> {
+        log::error!("egl::Surface::present()");
         let gl = unsafe { context.gl.lock() };
         let swapchain = self.swapchain.read();
         let sc = swapchain.as_ref().unwrap();
@@ -281,6 +288,7 @@ impl crate::Surface for Surface {
         device: &super::Device,
         config: &crate::SurfaceConfiguration,
     ) -> Result<(), crate::SurfaceError> {
+        log::warn!("egl::Surface::configure 1");
         let surface = match unsafe { self.unconfigure_impl(device) } {
             Some(surface) => surface,
             None => {
@@ -302,13 +310,24 @@ impl crate::Surface for Surface {
             }
         };
 
+        log::warn!("egl::Surface::configure 2");
+
         let format_desc = device.shared.describe_texture_format(config.format);
         let gl = &device.shared.context.gl.lock();
+
+        log::warn!("egl::Surface::configure 3");
+
         let renderbuffer = unsafe { gl.create_renderbuffer() }.map_err(|error| {
             log::error!("Internal swapchain renderbuffer creation failed: {error}");
             crate::DeviceError::OutOfMemory
         })?;
+
+        log::warn!("egl::Surface::configure 4");
+
         unsafe { gl.bind_renderbuffer(glow::RENDERBUFFER, Some(renderbuffer)) };
+
+        log::warn!("egl::Surface::configure 5");
+
         unsafe {
             gl.renderbuffer_storage(
                 glow::RENDERBUFFER,
@@ -317,11 +336,20 @@ impl crate::Surface for Surface {
                 config.extent.height as _,
             )
         };
+
+        log::warn!("egl::Surface::configure 6");
+
         let framebuffer = unsafe { gl.create_framebuffer() }.map_err(|error| {
             log::error!("Internal swapchain framebuffer creation failed: {error}");
             crate::DeviceError::OutOfMemory
         })?;
+
+        log::warn!("egl::Surface::configure 7");
+
         unsafe { gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(framebuffer)) };
+
+        log::warn!("egl::Surface::configure 8");
+
         unsafe {
             gl.framebuffer_renderbuffer(
                 glow::READ_FRAMEBUFFER,
@@ -330,8 +358,12 @@ impl crate::Surface for Surface {
                 Some(renderbuffer),
             )
         };
+
+        log::warn!("egl::Surface::configure 9");
         unsafe { gl.bind_renderbuffer(glow::RENDERBUFFER, None) };
         unsafe { gl.bind_framebuffer(glow::READ_FRAMEBUFFER, None) };
+
+        log::warn!("egl::Surface::configure 10");
 
         let mut swapchain = self.swapchain.write();
         *swapchain = Some(Swapchain {
@@ -344,6 +376,8 @@ impl crate::Surface for Surface {
             format_desc,
             sample_type: wgt::TextureSampleType::Float { filterable: false },
         });
+
+        log::warn!("egl::Surface::configure 11");
 
         Ok(())
     }

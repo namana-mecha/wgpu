@@ -446,13 +446,20 @@ impl Surface {
         &self,
         adapter: &hal::DynExposedAdapter,
     ) -> Result<hal::SurfaceCapabilities, GetSurfaceSupportError> {
+        println!("get_capabilities_with_raw 1");
+
         let backend = adapter.backend();
         let suf = self
             .raw(backend)
             .ok_or(GetSurfaceSupportError::NotSupportedByBackend(backend))?;
+
+        println!("get_capabilities_with_raw 2");
+
         profiling::scope!("surface_capabilities");
         let caps = unsafe { adapter.adapter.surface_capabilities(suf) }
             .ok_or(GetSurfaceSupportError::FailedToRetrieveSurfaceCapabilitiesForAdapter)?;
+
+        println!("get_capabilities_with_raw 3");
         Ok(caps)
     }
 

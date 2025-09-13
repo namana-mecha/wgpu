@@ -1571,8 +1571,8 @@ impl crate::Device for Device {
         fence: &<Self::A as crate::Api>::Fence,
     ) -> Result<crate::FenceValue, crate::DeviceError> {
         println!("Device::get_fence_value(fence: ?)");
-        // wasm specific
-        unimplemented!()
+        #[cfg_attr(target_arch = "wasm32", allow(clippy::needless_borrow))]
+        Ok(fence.get_latest(&self.shared.context.gl.lock()))
     }
 
     unsafe fn wait(
