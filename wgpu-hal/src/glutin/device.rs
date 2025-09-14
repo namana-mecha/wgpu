@@ -1,18 +1,16 @@
-use core::ptr::NonNull;
+use super::{conv, PrivateCapabilities};
+use crate::auxil::map_naga_stage;
+use glow::HasContext;
 use std::{
     cmp::max,
+    convert::TryInto,
     ptr,
-    sync::{atomic::Ordering, Arc, Mutex},
+    sync::{Arc, Mutex},
 };
 
+use crate::{AtomicFenceValue, TlasInstance};
 use arrayvec::ArrayVec;
-use glow::HasContext;
-
-use crate::{
-    auxil::map_naga_stage,
-    glutin::{conv, Device, PrivateCapabilities},
-    AtomicFenceValue,
-};
+use std::sync::atomic::Ordering;
 
 type ShaderStage<'a> = (
     naga::ShaderStage,
@@ -320,7 +318,7 @@ impl super::Device {
             .shared
             .program_cache
             .try_lock()
-            .expect("couldn't acquire program_cache lock");
+            .expect("Couldn't acquire program_cache lock");
         // This guard ensures that we can't accidentally destroy a program whilst we're about to reuse it
         // The only place that destroys a pipeline is also locking on `program_cache`
         let program = guard
@@ -500,14 +498,13 @@ impl super::Device {
     }
 }
 
-impl crate::Device for Device {
+impl crate::Device for super::Device {
     type A = super::Api;
 
     unsafe fn create_buffer(
         &self,
         desc: &crate::BufferDescriptor,
-    ) -> Result<<Self::A as crate::Api>::Buffer, crate::DeviceError> {
-        println!("Device::create_buffer(desc: {:?})", desc);
+    ) -> Result<super::Buffer, crate::DeviceError> {
         let target = if desc.usage.contains(crate::BufferUses::INDEX) {
             glow::ELEMENT_ARRAY_BUFFER
         } else {
@@ -534,7 +531,7 @@ impl crate::Device for Device {
             });
         }
 
-        let gl = &self.shared.context.gl.lock();
+        let gl = &self.shared.context.lock();
 
         let target = if desc.usage.contains(crate::BufferUses::INDEX) {
             glow::ELEMENT_ARRAY_BUFFER
@@ -634,27 +631,24 @@ impl crate::Device for Device {
         })
     }
 
-    unsafe fn destroy_buffer(&self, buffer: <Self::A as crate::Api>::Buffer) {
-        println!("Device::destroy_buffer(buffer: ?)");
+    unsafe fn destroy_buffer(&self, buffer: super::Buffer) {
         if let Some(raw) = buffer.raw {
-            let gl = &self.shared.context.gl.lock();
+            let gl = &self.shared.context.lock();
             unsafe { gl.delete_buffer(raw) };
         }
 
         self.counters.buffers.sub(1);
     }
 
-    unsafe fn add_raw_buffer(&self, _buffer: &<Self::A as crate::Api>::Buffer) {
-        println!("Device::add_raw_buffer(buffer: ?)");
+    unsafe fn add_raw_buffer(&self, _buffer: &super::Buffer) {
         self.counters.buffers.add(1);
     }
 
     unsafe fn map_buffer(
         &self,
-        buffer: &<Self::A as crate::Api>::Buffer,
+        buffer: &super::Buffer,
         range: crate::MemoryRange,
     ) -> Result<crate::BufferMapping, crate::DeviceError> {
-        println!("Device::map_buffer(buffer: ?, range: {:?})", range);
         let is_coherent = buffer.map_flags & glow::MAP_COHERENT_BIT != 0;
         let ptr = match buffer.raw {
             None => {
@@ -663,15 +657,12 @@ impl crate::Device for Device {
                 slice.as_mut_ptr()
             }
             Some(raw) => {
-                let gl = &self.shared.context.gl.lock();
+                let gl = &self.shared.context.lock();
                 unsafe { gl.bind_buffer(buffer.target, Some(raw)) };
                 let ptr = if let Some(ref map_read_allocation) = buffer.data {
                     let mut guard = map_read_allocation.lock().unwrap();
                     let slice = guard.as_mut_slice();
-
-                    unsafe {
-                        self.shared.get_buffer_sub_data(gl, buffer.target, 0, slice);
-                    };
+                    unsafe { self.shared.get_buffer_sub_data(gl, buffer.target, 0, slice) };
                     slice.as_mut_ptr()
                 } else {
                     *buffer.offset_of_current_mapping.lock().unwrap() = range.start;
@@ -693,12 +684,10 @@ impl crate::Device for Device {
             is_coherent,
         })
     }
-
-    unsafe fn unmap_buffer(&self, buffer: &<Self::A as crate::Api>::Buffer) {
-        println!("Device::unmap_buffer(buffer: ?)");
+    unsafe fn unmap_buffer(&self, buffer: &super::Buffer) {
         if let Some(raw) = buffer.raw {
             if buffer.data.is_none() {
-                let gl = &self.shared.context.gl.lock();
+                let gl = &self.shared.context.lock();
                 unsafe { gl.bind_buffer(buffer.target, Some(raw)) };
                 unsafe { gl.unmap_buffer(buffer.target) };
                 unsafe { gl.bind_buffer(buffer.target, None) };
@@ -706,15 +695,13 @@ impl crate::Device for Device {
             }
         }
     }
-
-    unsafe fn flush_mapped_ranges<I>(&self, buffer: &<Self::A as crate::Api>::Buffer, ranges: I)
+    unsafe fn flush_mapped_ranges<I>(&self, buffer: &super::Buffer, ranges: I)
     where
         I: Iterator<Item = crate::MemoryRange>,
     {
-        println!("Device::flush_mapped_ranges(buffer: ?, ranges: ...)");
         if let Some(raw) = buffer.raw {
             if buffer.data.is_none() {
-                let gl = &self.shared.context.gl.lock();
+                let gl = &self.shared.context.lock();
                 unsafe { gl.bind_buffer(buffer.target, Some(raw)) };
                 for range in ranges {
                     let offset_of_current_mapping =
@@ -730,24 +717,15 @@ impl crate::Device for Device {
             }
         }
     }
-
-    unsafe fn invalidate_mapped_ranges<I>(
-        &self,
-        _buffer: &<Self::A as crate::Api>::Buffer,
-        _ranges: I,
-    ) where
-        I: Iterator<Item = crate::MemoryRange>,
-    {
-        println!("Device::invalidate_mapped_ranges(buffer: ?, ranges: ...)");
-        //TODO: do we need to do anything? (from gles)
+    unsafe fn invalidate_mapped_ranges<I>(&self, _buffer: &super::Buffer, _ranges: I) {
+        //TODO: do we need to do anything?
     }
 
     unsafe fn create_texture(
         &self,
         desc: &crate::TextureDescriptor,
-    ) -> Result<<Self::A as crate::Api>::Texture, crate::DeviceError> {
-        println!("Device::create_texture(desc: {:?})", desc);
-        let gl = &self.shared.context.gl.lock();
+    ) -> Result<super::Texture, crate::DeviceError> {
+        let gl = &self.shared.context.lock();
 
         let render_usage = crate::TextureUses::COLOR_TARGET
             | crate::TextureUses::DEPTH_STENCIL_WRITE
@@ -978,10 +956,9 @@ impl crate::Device for Device {
         })
     }
 
-    unsafe fn destroy_texture(&self, texture: <Self::A as crate::Api>::Texture) {
-        println!("Device::destroy_texture(texture: ?)");
+    unsafe fn destroy_texture(&self, texture: super::Texture) {
         if texture.drop_guard.is_none() {
-            let gl = &self.shared.context.gl.lock();
+            let gl = &self.shared.context.lock();
             match texture.inner {
                 super::TextureInner::Renderbuffer { raw, .. } => {
                     unsafe { gl.delete_renderbuffer(raw) };
@@ -1002,17 +979,15 @@ impl crate::Device for Device {
         self.counters.textures.sub(1);
     }
 
-    unsafe fn add_raw_texture(&self, texture: &<Self::A as crate::Api>::Texture) {
-        println!("Device::add_raw_texture(texture: ?)");
+    unsafe fn add_raw_texture(&self, _texture: &super::Texture) {
         self.counters.textures.add(1);
     }
 
     unsafe fn create_texture_view(
         &self,
-        texture: &<Self::A as crate::Api>::Texture,
+        texture: &super::Texture,
         desc: &crate::TextureViewDescriptor,
-    ) -> Result<<Self::A as crate::Api>::TextureView, crate::DeviceError> {
-        println!("Device::create_texture_view(texture: ?, desc: {:?})", desc);
+    ) -> Result<super::TextureView, crate::DeviceError> {
         self.counters.texture_views.add(1);
         Ok(super::TextureView {
             //TODO: use `conv::map_view_dimension(desc.dimension)`?
@@ -1024,17 +999,15 @@ impl crate::Device for Device {
         })
     }
 
-    unsafe fn destroy_texture_view(&self, view: <Self::A as crate::Api>::TextureView) {
-        println!("Device::destroy_texture_view(view: ?)");
+    unsafe fn destroy_texture_view(&self, _view: super::TextureView) {
         self.counters.texture_views.sub(1);
     }
 
     unsafe fn create_sampler(
         &self,
         desc: &crate::SamplerDescriptor,
-    ) -> Result<<Self::A as crate::Api>::Sampler, crate::DeviceError> {
-        println!("Device::create_sampler(desc: {:?})", desc);
-        let gl = &self.shared.context.gl.lock();
+    ) -> Result<super::Sampler, crate::DeviceError> {
+        let gl = &self.shared.context.lock();
 
         let raw = unsafe { gl.create_sampler().unwrap() };
 
@@ -1127,18 +1100,16 @@ impl crate::Device for Device {
         Ok(super::Sampler { raw })
     }
 
-    unsafe fn destroy_sampler(&self, sampler: <Self::A as crate::Api>::Sampler) {
-        println!("Device::destroy_sampler(sampler: ?)");
-        let gl = &self.shared.context.gl.lock();
+    unsafe fn destroy_sampler(&self, sampler: super::Sampler) {
+        let gl = &self.shared.context.lock();
         unsafe { gl.delete_sampler(sampler.raw) };
         self.counters.samplers.sub(1);
     }
 
     unsafe fn create_command_encoder(
         &self,
-        _desc: &crate::CommandEncoderDescriptor<<Self::A as crate::Api>::Queue>,
-    ) -> Result<<Self::A as crate::Api>::CommandEncoder, crate::DeviceError> {
-        println!("Device::create_command_encoder(desc: ?)");
+        _desc: &crate::CommandEncoderDescriptor<super::Queue>,
+    ) -> Result<super::CommandEncoder, crate::DeviceError> {
         self.counters.command_encoders.add(1);
 
         Ok(super::CommandEncoder {
@@ -1152,18 +1123,14 @@ impl crate::Device for Device {
     unsafe fn create_bind_group_layout(
         &self,
         desc: &crate::BindGroupLayoutDescriptor,
-    ) -> Result<<Self::A as crate::Api>::BindGroupLayout, crate::DeviceError> {
+    ) -> Result<super::BindGroupLayout, crate::DeviceError> {
         self.counters.bind_group_layouts.add(1);
         Ok(super::BindGroupLayout {
             entries: Arc::from(desc.entries),
         })
     }
 
-    unsafe fn destroy_bind_group_layout(
-        &self,
-        _bg_layout: <Self::A as crate::Api>::BindGroupLayout,
-    ) {
-        println!("Device::destroy_bind_group_layout(bg_layout: ?)");
+    unsafe fn destroy_bind_group_layout(&self, _bg_layout: super::BindGroupLayout) {
         self.counters.bind_group_layouts.sub(1);
     }
 
@@ -1171,7 +1138,6 @@ impl crate::Device for Device {
         &self,
         desc: &crate::PipelineLayoutDescriptor<super::BindGroupLayout>,
     ) -> Result<super::PipelineLayout, crate::DeviceError> {
-        println!("Device::create_pipeline_layout(desc: ?)");
         use naga::back::glsl;
 
         let mut group_infos = Vec::with_capacity(desc.bind_group_layouts.len());
@@ -1256,11 +1222,7 @@ impl crate::Device for Device {
         })
     }
 
-    unsafe fn destroy_pipeline_layout(
-        &self,
-        _pipeline_layout: <Self::A as crate::Api>::PipelineLayout,
-    ) {
-        println!("Device::destroy_pipeline_layout(pipeline_layout: ?)");
+    unsafe fn destroy_pipeline_layout(&self, _pipeline_layout: super::PipelineLayout) {
         self.counters.pipeline_layouts.sub(1);
     }
 
@@ -1274,7 +1236,6 @@ impl crate::Device for Device {
             super::AccelerationStructure,
         >,
     ) -> Result<super::BindGroup, crate::DeviceError> {
-        println!("Device::create_bind_group(desc: ?)");
         let mut contents = Vec::new();
 
         let layout_and_entry_iter = desc.entries.iter().map(|entry| {
@@ -1352,8 +1313,7 @@ impl crate::Device for Device {
         })
     }
 
-    unsafe fn destroy_bind_group(&self, _group: <Self::A as crate::Api>::BindGroup) {
-        println!("Device::destroy_bind_group(group: ?)");
+    unsafe fn destroy_bind_group(&self, _group: super::BindGroup) {
         self.counters.bind_groups.sub(1);
     }
 
@@ -1361,8 +1321,7 @@ impl crate::Device for Device {
         &self,
         desc: &crate::ShaderModuleDescriptor,
         shader: crate::ShaderInput,
-    ) -> Result<<Self::A as crate::Api>::ShaderModule, crate::ShaderError> {
-        println!("Device::create_shader_module(desc: ?, shader: ?)");
+    ) -> Result<super::ShaderModule, crate::ShaderError> {
         self.counters.shader_modules.add(1);
 
         Ok(super::ShaderModule {
@@ -1377,21 +1336,19 @@ impl crate::Device for Device {
         })
     }
 
-    unsafe fn destroy_shader_module(&self, module: <Self::A as crate::Api>::ShaderModule) {
-        println!("Device::destroy_shader_module(module: ?)");
+    unsafe fn destroy_shader_module(&self, _module: super::ShaderModule) {
         self.counters.shader_modules.sub(1);
     }
 
     unsafe fn create_render_pipeline(
         &self,
         desc: &crate::RenderPipelineDescriptor<
-            <Self::A as crate::Api>::PipelineLayout,
-            <Self::A as crate::Api>::ShaderModule,
-            <Self::A as crate::Api>::PipelineCache,
+            super::PipelineLayout,
+            super::ShaderModule,
+            super::PipelineCache,
         >,
-    ) -> Result<<Self::A as crate::Api>::RenderPipeline, crate::PipelineError> {
-        println!("Device::create_render_pipeline(desc: ?)");
-        let gl = &self.shared.context.gl.lock();
+    ) -> Result<super::RenderPipeline, crate::PipelineError> {
+        let gl = &self.shared.context.lock();
         let mut shaders = ArrayVec::new();
         shaders.push((naga::ShaderStage::Vertex, &desc.vertex_stage));
         if let Some(ref fs) = desc.fragment_stage {
@@ -1459,14 +1416,13 @@ impl crate::Device for Device {
         })
     }
 
-    unsafe fn destroy_render_pipeline(&self, pipeline: <Self::A as crate::Api>::RenderPipeline) {
-        println!("Device::destroy_render_pipeline(pipeline: ?)");
+    unsafe fn destroy_render_pipeline(&self, pipeline: super::RenderPipeline) {
         // If the pipeline only has 2 strong references remaining, they're `pipeline` and `program_cache`
         // This is safe to assume as long as:
         // - `RenderPipeline` can't be cloned
         // - The only place that we can get a new reference is during `program_cache.lock()`
         if Arc::strong_count(&pipeline.inner) == 2 {
-            let gl = &self.shared.context.gl.lock();
+            let gl = &self.shared.context.lock();
             let mut program_cache = self.shared.program_cache.lock();
             program_cache.retain(|_, v| match *v {
                 Ok(ref p) => p.program != pipeline.inner.program,
@@ -1481,13 +1437,12 @@ impl crate::Device for Device {
     unsafe fn create_compute_pipeline(
         &self,
         desc: &crate::ComputePipelineDescriptor<
-            <Self::A as crate::Api>::PipelineLayout,
-            <Self::A as crate::Api>::ShaderModule,
-            <Self::A as crate::Api>::PipelineCache,
+            super::PipelineLayout,
+            super::ShaderModule,
+            super::PipelineCache,
         >,
-    ) -> Result<<Self::A as crate::Api>::ComputePipeline, crate::PipelineError> {
-        println!("Device::create_compute_pipeline(desc: ?)");
-        let gl = &self.shared.context.gl.lock();
+    ) -> Result<super::ComputePipeline, crate::PipelineError> {
+        let gl = &self.shared.context.lock();
         let mut shaders = ArrayVec::new();
         shaders.push((naga::ShaderStage::Compute, &desc.stage));
         let inner = unsafe { self.create_pipeline(gl, shaders, desc.layout, desc.label, None) }?;
@@ -1497,14 +1452,13 @@ impl crate::Device for Device {
         Ok(super::ComputePipeline { inner })
     }
 
-    unsafe fn destroy_compute_pipeline(&self, pipeline: <Self::A as crate::Api>::ComputePipeline) {
-        println!("Device::destroy_compute_pipeline(pipeline: ?)");
+    unsafe fn destroy_compute_pipeline(&self, pipeline: super::ComputePipeline) {
         // If the pipeline only has 2 strong references remaining, they're `pipeline` and `program_cache``
         // This is safe to assume as long as:
         // - `ComputePipeline` can't be cloned
         // - The only place that we can get a new reference is during `program_cache.lock()`
         if Arc::strong_count(&pipeline.inner) == 2 {
-            let gl = &self.shared.context.gl.lock();
+            let gl = &self.shared.context.lock();
             let mut program_cache = self.shared.program_cache.lock();
             program_cache.retain(|_, v| match *v {
                 Ok(ref p) => p.program != pipeline.inner.program,
@@ -1518,38 +1472,56 @@ impl crate::Device for Device {
 
     unsafe fn create_pipeline_cache(
         &self,
-        desc: &crate::PipelineCacheDescriptor<'_>,
-    ) -> Result<<Self::A as crate::Api>::PipelineCache, crate::PipelineCacheError> {
-        println!("Device::create_pipeline_cache(desc: ?)");
+        _: &crate::PipelineCacheDescriptor<'_>,
+    ) -> Result<super::PipelineCache, crate::PipelineCacheError> {
         // Even though the cache doesn't do anything, we still return something here
         // as the least bad option
         Ok(super::PipelineCache)
     }
+    unsafe fn destroy_pipeline_cache(&self, _: super::PipelineCache) {}
 
-    unsafe fn destroy_pipeline_cache(&self, _: super::PipelineCache) {
-        println!("Device::destroy_pipeline_cache(cache: ?)");
-    }
-
+    #[cfg_attr(target_arch = "wasm32", allow(unused))]
     unsafe fn create_query_set(
         &self,
         desc: &wgt::QuerySetDescriptor<crate::Label>,
-    ) -> Result<<Self::A as crate::Api>::QuerySet, crate::DeviceError> {
-        println!("Device::create_query_set(desc: {:?})", desc);
-        // wasm specific
-        unimplemented!()
+    ) -> Result<super::QuerySet, crate::DeviceError> {
+        let gl = &self.shared.context.lock();
+
+        let mut queries = Vec::with_capacity(desc.count as usize);
+        for _ in 0..desc.count {
+            let query =
+                unsafe { gl.create_query() }.map_err(|_| crate::DeviceError::OutOfMemory)?;
+
+            // We aren't really able to, in general, label queries.
+            //
+            // We could take a timestamp here to "initialize" the query,
+            // but that's a bit of a hack, and we don't want to insert
+            // random timestamps into the command stream of we don't have to.
+
+            queries.push(query);
+        }
+
+        self.counters.query_sets.add(1);
+
+        Ok(super::QuerySet {
+            queries: queries.into_boxed_slice(),
+            target: match desc.ty {
+                wgt::QueryType::Occlusion => glow::ANY_SAMPLES_PASSED_CONSERVATIVE,
+                wgt::QueryType::Timestamp => glow::TIMESTAMP,
+                _ => unimplemented!(),
+            },
+        })
     }
 
-    unsafe fn destroy_query_set(&self, set: <Self::A as crate::Api>::QuerySet) {
-        println!("Device::destroy_query_set(set: ?)");
-        let gl = &self.shared.context.gl.lock();
+    unsafe fn destroy_query_set(&self, set: super::QuerySet) {
+        let gl = &self.shared.context.lock();
         for &query in set.queries.iter() {
             unsafe { gl.delete_query(query) };
         }
         self.counters.query_sets.sub(1);
     }
 
-    unsafe fn create_fence(&self) -> Result<<Self::A as crate::Api>::Fence, crate::DeviceError> {
-        println!("Device::create_fence()");
+    unsafe fn create_fence(&self) -> Result<super::Fence, crate::DeviceError> {
         self.counters.fences.add(1);
         Ok(super::Fence {
             last_completed: AtomicFenceValue::new(0),
@@ -1557,9 +1529,8 @@ impl crate::Device for Device {
         })
     }
 
-    unsafe fn destroy_fence(&self, fence: <Self::A as crate::Api>::Fence) {
-        println!("Device::destroy_fence(fence: ?)");
-        let gl = &self.shared.context.gl.lock();
+    unsafe fn destroy_fence(&self, fence: super::Fence) {
+        let gl = &self.shared.context.lock();
         for (_, sync) in fence.pending {
             unsafe { gl.delete_sync(sync) };
         }
@@ -1568,13 +1539,11 @@ impl crate::Device for Device {
 
     unsafe fn get_fence_value(
         &self,
-        fence: &<Self::A as crate::Api>::Fence,
+        fence: &super::Fence,
     ) -> Result<crate::FenceValue, crate::DeviceError> {
-        println!("Device::get_fence_value(fence: ?)");
         #[cfg_attr(target_arch = "wasm32", allow(clippy::needless_borrow))]
-        Ok(fence.get_latest(&self.shared.context.gl.lock()))
+        Ok(fence.get_latest(&self.shared.context.lock()))
     }
-
     unsafe fn wait(
         &self,
         fence: &super::Fence,
@@ -1582,7 +1551,7 @@ impl crate::Device for Device {
         timeout_ms: u32,
     ) -> Result<bool, crate::DeviceError> {
         if fence.last_completed.load(Ordering::Relaxed) < wait_value {
-            let gl = &self.shared.context.gl.lock();
+            let gl = &self.shared.context.lock();
             // MAX_CLIENT_WAIT_TIMEOUT_WEBGL is:
             // - 1s in Gecko https://searchfox.org/mozilla-central/rev/754074e05178e017ef6c3d8e30428ffa8f1b794d/dom/canvas/WebGLTypes.h#1386
             // - 0 in WebKit https://github.com/WebKit/WebKit/blob/4ef90d4672ca50267c0971b85db403d9684508ea/Source/WebCore/html/canvas/WebGL2RenderingContext.cpp#L110
@@ -1622,60 +1591,55 @@ impl crate::Device for Device {
     }
 
     unsafe fn start_capture(&self) -> bool {
-        // #[cfg(all(native, feature = "renderdoc"))]
-        // return unsafe {
-        //     self.render_doc
-        //         .start_frame_capture(self.shared.context.raw_context(), ptr::null_mut())
-        // };
+        #[cfg(all(native, feature = "renderdoc"))]
+        return unsafe {
+            self.render_doc
+                .start_frame_capture(self.shared.context.raw_context(), ptr::null_mut())
+        };
         #[allow(unreachable_code)]
         false
     }
     unsafe fn stop_capture(&self) {
-        // #[cfg(all(native, feature = "renderdoc"))]
-        // unsafe {
-        //     self.render_doc
-        //         .end_frame_capture(ptr::null_mut(), ptr::null_mut())
-        // }
+        #[cfg(all(native, feature = "renderdoc"))]
+        unsafe {
+            self.render_doc
+                .end_frame_capture(ptr::null_mut(), ptr::null_mut())
+        }
     }
-
     unsafe fn create_acceleration_structure(
         &self,
-        desc: &crate::AccelerationStructureDescriptor,
-    ) -> Result<<Self::A as crate::Api>::AccelerationStructure, crate::DeviceError> {
-        println!("Device::create_acceleration_structure(desc: {:?})", desc);
+        _desc: &crate::AccelerationStructureDescriptor,
+    ) -> Result<super::AccelerationStructure, crate::DeviceError> {
         unimplemented!()
     }
-
-    unsafe fn get_acceleration_structure_build_sizes(
+    unsafe fn get_acceleration_structure_build_sizes<'a>(
         &self,
-        desc: &crate::GetAccelerationStructureBuildSizesDescriptor<<Self::A as crate::Api>::Buffer>,
+        _desc: &crate::GetAccelerationStructureBuildSizesDescriptor<'a, super::Buffer>,
     ) -> crate::AccelerationStructureBuildSizes {
-        println!("Device::get_acceleration_structure_build_sizes(desc: ?)");
         unimplemented!()
     }
-
     unsafe fn get_acceleration_structure_device_address(
         &self,
-        acceleration_structure: &<Self::A as crate::Api>::AccelerationStructure,
+        _acceleration_structure: &super::AccelerationStructure,
     ) -> wgt::BufferAddress {
-        println!("Device::get_acceleration_structure_device_address(acceleration_structure: ?)");
         unimplemented!()
     }
-
     unsafe fn destroy_acceleration_structure(
         &self,
-        acceleration_structure: <Self::A as crate::Api>::AccelerationStructure,
+        _acceleration_structure: super::AccelerationStructure,
     ) {
-        println!("Device::destroy_acceleration_structure(acceleration_structure: ?)");
     }
 
-    fn tlas_instance_to_bytes(&self, instance: crate::TlasInstance) -> std::vec::Vec<u8> {
-        println!("Device::tlas_instance_to_bytes(instance: ?)");
+    fn tlas_instance_to_bytes(&self, _instance: TlasInstance) -> Vec<u8> {
         unimplemented!()
     }
 
     fn get_internal_counters(&self) -> wgt::HalCounters {
-        println!("Device::get_internal_counters()");
         self.counters.as_ref().clone()
     }
 }
+
+#[cfg(send_sync)]
+unsafe impl Sync for super::Device {}
+#[cfg(send_sync)]
+unsafe impl Send for super::Device {}

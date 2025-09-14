@@ -1,14 +1,6 @@
-use std::{mem::ManuallyDrop, sync::Arc};
-
-use parking_lot::Mutex;
-
 use glow::HasContext;
-use glutin::{display::GetGlDisplay, prelude::GlDisplay};
-use wgt::{CompositeAlphaMode, PresentMode, TextureFormat};
-
-use crate::{glutin::Adapter, AtomicFenceValue, TextureUses};
-
-use std::sync::atomic::AtomicU8;
+use parking_lot::Mutex;
+use std::sync::{atomic::AtomicU8, Arc};
 use wgt::AstcChannel;
 
 use crate::auxil::db;
@@ -142,6 +134,8 @@ impl super::Adapter {
             "intel",
             "v3d",
             "apple m", // all apple m are integrated
+            "etnaviv",
+            "vivante",
         ];
         let strings_that_imply_cpu = ["mesa offscreen", "swiftshader", "llvmpipe"];
 
@@ -201,7 +195,7 @@ impl super::Adapter {
     pub(super) unsafe fn expose(
         context: super::AdapterContext,
     ) -> Option<crate::ExposedAdapter<super::Api>> {
-        let gl = context.gl.lock();
+        let gl = context.lock();
         let extensions = gl.supported_extensions();
 
         let (vendor_const, renderer_const) = if extensions.contains("WEBGL_debug_renderer_info") {
@@ -801,6 +795,21 @@ impl super::Adapter {
         );
 
         let r = renderer.to_lowercase();
+        // Check for Mesa sRGB clear bug. See
+        // [`super::PrivateCapabilities::MESA_I915_SRGB_SHADER_CLEAR`].
+        if context.is_owned()
+            && r.contains("mesa")
+            && r.contains("intel")
+            && r.split(&[' ', '(', ')'][..])
+                .any(|substr| substr.len() == 3 && substr.chars().nth(2) == Some('l'))
+        {
+            log::warn!(
+                "Detected skylake derivative running on mesa i915. Clears to srgb textures will \
+                use manual shader clears."
+            );
+            workarounds.set(super::Workarounds::MESA_I915_SRGB_SHADER_CLEAR, true);
+        }
+
         let downlevel_defaults = wgt::DownlevelLimits {};
         let max_samples = unsafe { gl.get_parameter_i32(glow::MAX_SAMPLES) };
 
@@ -943,7 +952,7 @@ impl crate::Adapter for super::Adapter {
         _limits: &wgt::Limits,
         _memory_hints: &wgt::MemoryHints,
     ) -> Result<crate::OpenDevice<super::Api>, crate::DeviceError> {
-        let gl = &self.shared.context.gl.lock();
+        let gl = &self.shared.context.lock();
         unsafe { gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1) };
         unsafe { gl.pixel_store_i32(glow::PACK_ALIGNMENT, 1) };
         let main_vao =

@@ -84,12 +84,12 @@ we don't bother with that combination.
 ///cbindgen:ignore
 #[cfg(not(any(windows, webgl)))]
 mod egl;
-#[cfg(Emscripten)]
-mod emscripten;
-#[cfg(webgl)]
-mod web;
-#[cfg(windows)]
-mod wgl;
+// #[cfg(Emscripten)]
+// mod emscripten;
+// #[cfg(webgl)]
+// mod web;
+// #[cfg(windows)]
+// mod wgl;
 
 mod adapter;
 mod command;
@@ -104,15 +104,15 @@ pub use self::egl::{AdapterContext, AdapterContextLock};
 #[cfg(not(any(windows, webgl)))]
 use self::egl::{Instance, Surface};
 
-// #[cfg(webgl)]
-// pub use self::web::AdapterContext;
-// #[cfg(webgl)]
-// use self::web::{Instance, Surface};
+#[cfg(webgl)]
+pub use self::web::AdapterContext;
+#[cfg(webgl)]
+use self::web::{Instance, Surface};
 
-// #[cfg(windows)]
-// use self::wgl::AdapterContext;
-// #[cfg(windows)]
-// use self::wgl::{Instance, Surface};
+#[cfg(windows)]
+use self::wgl::AdapterContext;
+#[cfg(windows)]
+use self::wgl::{Instance, Surface};
 
 use arrayvec::ArrayVec;
 
@@ -298,9 +298,8 @@ pub struct Device {
 
 impl Drop for Device {
     fn drop(&mut self) {
-        // TODO
-        // let gl = &self.shared.context.lock();
-        // unsafe { gl.delete_vertex_array(self.main_vao) };
+        let gl = &self.shared.context.lock();
+        unsafe { gl.delete_vertex_array(self.main_vao) };
     }
 }
 
@@ -327,11 +326,10 @@ pub struct Queue {
 
 impl Drop for Queue {
     fn drop(&mut self) {
-        // TODO
-        // let gl = &self.shared.context.lock();
-        // unsafe { gl.delete_framebuffer(self.draw_fbo) };
-        // unsafe { gl.delete_framebuffer(self.copy_fbo) };
-        // unsafe { gl.delete_buffer(self.zero_buffer) };
+        let gl = &self.shared.context.lock();
+        unsafe { gl.delete_framebuffer(self.draw_fbo) };
+        unsafe { gl.delete_framebuffer(self.copy_fbo) };
+        unsafe { gl.delete_buffer(self.zero_buffer) };
     }
 }
 
@@ -1136,7 +1134,7 @@ fn gl_debug_message_callback(source: u32, gltype: u32, id: u32, severity: u32, m
     let _ = std::panic::catch_unwind(|| {
         log::log!(
             log_severity,
-            "GLUTIN: [{}/{}] ID {} : {}",
+            "GLES: [{}/{}] ID {} : {}",
             source_str,
             type_str,
             id,
