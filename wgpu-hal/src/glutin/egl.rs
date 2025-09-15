@@ -16,6 +16,9 @@ use std::{
     time::Duration,
 };
 
+/// The amount of time to wait while trying to obtain a lock to the adapter context
+const CONTEXT_LOCK_TIMEOUT_SECS: u64 = 1;
+
 fn parse_egl_version(version_str: &str) -> Option<(i32, i32)> {
     // Expects format: "EGL {major}.{minor}"
     let parts: Vec<&str> = version_str.trim().split_whitespace().collect();
@@ -44,9 +47,88 @@ impl EglContext {
         let _ = self.context.make_current(&self.pbuffer);
     }
 
-    fn unmake_current(&mut self) {
+    fn unmake_current(&self) {
         // TODO is make_not_current_in_place() okay, or should we switch to make_not_current?
         let _ = self.context.make_not_current_in_place();
+    }
+}
+
+/// A wrapper around a [`glow::Context`] and the required EGL context that uses locking to guarantee
+/// exclusive access when shared with multiple threads.
+pub struct AdapterContext {
+    glow: Mutex<ManuallyDrop<glow::Context>>,
+    egl: Option<EglContext>,
+}
+
+unsafe impl Sync for AdapterContext {}
+unsafe impl Send for AdapterContext {}
+
+impl AdapterContext {
+    pub fn is_owned(&self) -> bool {
+        self.egl.is_some()
+    }
+
+    /// Returns the EGL instance.
+    ///
+    /// This provides access to EGL functions and the ability to load GL and EGL extension functions.
+    pub fn egl_instance(&self) -> Option<&Egl> {
+        self.egl.as_ref().map(|egl| &*egl.display.egl())
+    }
+
+    /// Returns the EGLDisplay corresponding to the adapter context.
+    ///
+    /// Returns [`None`] if the adapter was externally created.
+    pub fn raw_display(&self) -> Option<glutin::api::egl::display::Display> {
+        let display = match self.egl {
+            Some(ref egl) => Some(egl.display.clone()),
+            None => None,
+        };
+        display
+    }
+
+    /// Returns the EGL version the adapter context was created with.
+    ///
+    /// Returns [`None`] if the adapter was externally created.
+    pub fn egl_version(&self) -> Option<(i32, i32)> {
+        let version = match self.egl {
+            Some(ref egl) => {
+                Some(egl.version)
+            }
+            None => None,
+        };
+        version
+    }
+
+    pub fn raw_context(&self) -> Option<RawContext> {
+        match self.egl {
+            Some(ref egl) => Some(egl.context.raw_context()),
+            None => None,
+        }
+    }
+}
+
+impl Drop for AdapterContext {
+    fn drop(&mut self) {
+        struct CurrentGuard<'a>(&'a EglContext);
+        impl Drop for CurrentGuard<'_> {
+            fn drop(&mut self) {
+                self.0.unmake_current();
+            }
+        }
+
+        // Context must be current when dropped. See safety docs on
+        // `glow::HasContext`.
+        //
+        // NOTE: This is only set to `None` by `Adapter::new_external` which
+        // requires the context to be current when anything that may be holding
+        // the `Arc<AdapterShared>` is dropped.
+        let _guard = self.egl.as_ref().map(|egl| {
+            egl.make_current();
+            CurrentGuard(&egl)
+        });
+        let glow = self.glow.get_mut();
+        // SAFETY: Field not used after this.
+        unsafe { ManuallyDrop::drop(glow) };
     }
 }
 
@@ -77,54 +159,49 @@ impl<'a> Drop for AdapterContextLock<'a> {
     }
 }
 
-/// A wrapper around a [`glow::Context`] and the required EGL context that uses locking to guarantee
-/// exclusive access when shared with multiple threads.
-pub struct AdapterContext {
-    glow: Mutex<ManuallyDrop<glow::Context>>,
-    egl: Option<glutin::api::egl::context::PossiblyCurrentContext>,
-}
-
-unsafe impl Sync for AdapterContext {}
-unsafe impl Send for AdapterContext {}
-
 impl AdapterContext {
-    pub fn is_owned(&self) -> bool {
-        self.egl.is_some()
+    /// Get's the [`glow::Context`] without waiting for a lock
+    ///
+    /// # Safety
+    ///
+    /// This should only be called when you have manually made sure that the current thread has made
+    /// the EGL context current and that no other thread also has the EGL context current.
+    /// Additionally, you must manually make the EGL context **not** current after you are done with
+    /// it, so that future calls to `lock()` will not fail.
+    ///
+    /// > **Note:** Calling this function **will** still lock the [`glow::Context`] which adds an
+    /// > extra safe-guard against accidental concurrent access to the context.
+    pub unsafe fn get_without_egl_lock(&self) -> MappedMutexGuard<glow::Context> {
+        let guard = self
+            .glow
+            .try_lock_for(Duration::from_secs(CONTEXT_LOCK_TIMEOUT_SECS))
+            .expect("Could not lock adapter context. This is most-likely a deadlock.");
+        MutexGuard::map(guard, |glow| &mut **glow)
     }
 
-    /// Returns the EGLDisplay corresponding to the adapter context.
-    ///
-    /// Returns [`None`] if the adapter was externally created.
-    pub fn raw_display(&self) -> Option<glutin::api::egl::display::Display> {
-        let display = match self.egl {
-            Some(ref egl) => Some(egl.display()),
-            None => None,
-        };
-        display
-    }
+    /// Obtain a lock to the EGL context and get handle to the [`glow::Context`] that can be used to
+    /// do rendering.
+    #[track_caller]
+    pub fn lock<'a>(&'a self) -> AdapterContextLock<'a> {
+        let glow = self
+            .glow
+            // Don't lock forever. If it takes longer than 1 second to get the lock we've got a
+            // deadlock and should panic to show where we got stuck
+            .try_lock_for(Duration::from_secs(CONTEXT_LOCK_TIMEOUT_SECS))
+            .expect("Could not lock adapter context. This is most-likely a deadlock.");
 
-    /// Returns the EGL version the adapter context was created with.
-    ///
-    /// Returns [`None`] if the adapter was externally created.
-    pub fn egl_version(&self) -> Option<(i32, i32)> {
-        let version = match self.egl {
-            Some(ref egl) => {
-                let display = egl.display();
-                let version_str = display.version_string();
-                Some(parse_egl_version(&version_str).unwrap())
+        let egl = self.egl.as_ref().map(|egl| {
+            egl.make_current();
+            EglContextLock {
+                context: &egl.context,
+                display: egl.display.clone(),
             }
-            None => None,
-        };
-        version
-    }
+        });
 
-    pub fn raw_context(&self) -> Option<RawContext> {
-        match self.egl {
-            Some(ref egl) => Some(egl.raw_context()),
-            None => None,
-        }
+        AdapterContextLock { glow, egl }
     }
 }
+
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum SrgbFrameBufferKind {
@@ -345,7 +422,7 @@ impl crate::Instance for Instance {
         &self,
         surface_hint: Option<&<Self::A as crate::Api>::Surface>,
     ) -> Vec<crate::ExposedAdapter<Self::A>> {
-        let mut inner = self.inner.lock();
+        let inner = self.inner.lock();
         inner.egl.make_current();
 
         let mut gl = unsafe {
@@ -375,22 +452,20 @@ impl crate::Instance for Instance {
             unsafe { gl.debug_message_callback(super::gl_debug_message_callback) };
         }
 
-        todo!();
-
         // Wrap in ManuallyDrop to make it easier to "current" the GL context before dropping this
         // GLOW context, which could also happen if a panic occurs after we uncurrent the context
         // below but before AdapterContext is constructed.
-        // let gl = ManuallyDrop::new(gl);
-        // inner.egl.unmake_current();
+        let gl = ManuallyDrop::new(gl);
+        inner.egl.unmake_current();
 
-        // unsafe {
-        //     super::Adapter::expose(AdapterContext {
-        //         glow: Mutex::new(gl),
-        //         egl: Some(inner.egl.clone()),
-        //     })
-        // }
-        // .into_iter()
-        // .collect()
+        unsafe {
+            super::Adapter::expose(AdapterContext {
+                glow: Mutex::new(gl),
+                egl: Some(inner.egl.clone()),
+            })
+        }
+        .into_iter()
+        .collect()
     }
 }
 
