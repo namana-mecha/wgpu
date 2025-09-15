@@ -46,12 +46,18 @@ struct EglContext {
 
 impl EglContext {
     fn make_current(&self) {
-        let _ = self.context.make_current_surfaceless();
+        let res = self.context.make_current_surfaceless();
+        if res.is_err() {
+            log::error!("Error in make_current_surfaceless");
+        }
     }
 
     fn unmake_current(&self) {
         // TODO is make_not_current_in_place() okay, or should we switch to make_not_current?
-        let _ = self.context.make_not_current_in_place();
+        let res = self.context.make_not_current_in_place();
+        if res.is_err() {
+            log::error!("Error in make_current_surfaceless");
+        }
     }
 }
 
@@ -154,7 +160,10 @@ impl<'a> std::ops::Deref for AdapterContextLock<'a> {
 impl<'a> Drop for AdapterContextLock<'a> {
     fn drop(&mut self) {
         if let Some(egl) = self.egl.take() {
-            egl.context.make_current_surfaceless().unwrap();
+            let res = egl.context.make_not_current_in_place();
+            if res.is_err() {
+                log::error!("Cannot make_not_current_in_place()");
+            }
         }
     }
 }
@@ -597,7 +606,11 @@ impl Surface {
         let swapchain = self.swapchain.read();
         let sc = swapchain.as_ref().unwrap();
 
-        let _ = self.egl.context.make_current(&sc.surface);
+        let res = self.egl.context.make_current(&sc.surface);
+        if res.is_err() {
+            log::error!("Failed make_current()");
+        }
+
 
         unsafe { gl.disable(glow::SCISSOR_TEST) };
         unsafe { gl.color_mask(true, true, true, true) };
@@ -638,7 +651,7 @@ impl Surface {
         let _ = sc.surface.swap_buffers(&self.egl.context);
 
         // make current surfaceless
-        self.egl.make_current();
+        self.egl.unmake_current();
 
         Ok(())
     }
