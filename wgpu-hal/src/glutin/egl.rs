@@ -5,14 +5,21 @@ use glutin::{
     context::{AsRawContext, ContextApi, ContextAttributesBuilder, RawContext, Version},
     display::{AsRawDisplay, DisplayApiPreference, GetDisplayExtensions, GetGlDisplay},
     prelude::{GlDisplay, NotCurrentGlContext, PossiblyCurrentGlContext},
-    surface::{AsRawSurface, WindowSurface},
+    surface::{AsRawSurface, GlSurface, WindowSurface},
 };
 use khronos_egl::Downcast;
 use once_cell::sync::Lazy;
 use parking_lot::{MappedMutexGuard, Mutex, MutexGuard, RwLock};
 
 use std::{
-    collections::HashMap, ffi::{self, CString}, mem::ManuallyDrop, num::NonZero, os::raw, ptr, rc::Rc, sync::Arc,
+    collections::HashMap,
+    ffi::{self, CString},
+    mem::ManuallyDrop,
+    num::NonZero,
+    os::raw,
+    ptr,
+    rc::Rc,
+    sync::Arc,
     time::Duration,
 };
 
@@ -36,9 +43,9 @@ fn parse_egl_version(version_str: &str) -> Option<(i32, i32)> {
 
 #[derive(Clone, Debug)]
 struct EglContext {
-    context: Arc<glutin::api::egl::context::PossiblyCurrentContext>,
+    pub context: Arc<glutin::api::egl::context::PossiblyCurrentContext>,
     version: (i32, i32),
-    display: glutin::api::egl::display::Display,
+    pub display: glutin::api::egl::display::Display,
     pbuffer: Arc<glutin::api::egl::surface::Surface<glutin::surface::PbufferSurface>>,
 }
 
@@ -91,9 +98,7 @@ impl AdapterContext {
     /// Returns [`None`] if the adapter was externally created.
     pub fn egl_version(&self) -> Option<(i32, i32)> {
         let version = match self.egl {
-            Some(ref egl) => {
-                Some(egl.version)
-            }
+            Some(ref egl) => Some(egl.version),
             None => None,
         };
         version
@@ -201,7 +206,6 @@ impl AdapterContext {
         AdapterContextLock { glow, egl }
     }
 }
-
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum SrgbFrameBufferKind {
@@ -401,10 +405,10 @@ impl crate::Instance for Instance {
         _display_handle: raw_window_handle::RawDisplayHandle,
         window_handle: raw_window_handle::RawWindowHandle,
     ) -> Result<<Self::A as crate::Api>::Surface, crate::InstanceError> {
-        // not using the display handle passed, as in glutin backend we 
+        // not using the display handle passed, as in glutin backend we
         // are already passing the display handle in instance desc
         let mut inner = self.inner.lock();
-        
+
         inner.egl.unmake_current();
 
         Ok(Surface {
@@ -485,7 +489,7 @@ pub struct Swapchain {
 }
 #[derive(Debug)]
 pub struct Surface {
-    egl: EglContext,
+    pub egl: EglContext,
     wsi: WindowSystemInterface,
     config: glutin::api::egl::config::Config,
     pub(super) presentable: bool,
@@ -503,23 +507,23 @@ impl Surface {
         _suf_texture: super::Texture,
         context: &AdapterContext,
     ) -> Result<(), crate::SurfaceError> {
-        todo!("present");
         let gl = unsafe { context.get_without_egl_lock() };
         let swapchain = self.swapchain.read();
         let sc = swapchain.as_ref().unwrap();
 
-        self.egl
-            .instance
-            .make_current(
-                self.egl.display,
-                Some(sc.surface),
-                Some(sc.surface),
-                Some(self.egl.raw),
-            )
-            .map_err(|e| {
-                log::error!("make_current(surface) failed: {}", e);
-                crate::SurfaceError::Lost
-            })?;
+        self.egl.context.make_current(&sc.surface);
+        // self.egl
+        //     .instance
+        //     .make_current(
+        //         self.egl.display,
+        //         Some(sc.surface),
+        //         Some(sc.surface),
+        //         Some(self.egl.raw),
+        //     )
+        //     .map_err(|e| {
+        //         log::error!("make_current(surface) failed: {}", e);
+        //         crate::SurfaceError::Lost
+        //     })?;
 
         unsafe { gl.disable(glow::SCISSOR_TEST) };
         unsafe { gl.color_mask(true, true, true, true) };
@@ -557,21 +561,8 @@ impl Surface {
 
         unsafe { gl.bind_framebuffer(glow::READ_FRAMEBUFFER, None) };
 
-        self.egl
-            .instance
-            .swap_buffers(self.egl.display, sc.surface)
-            .map_err(|e| {
-                log::error!("swap_buffers failed: {}", e);
-                crate::SurfaceError::Lost
-                // TODO: should we unset the current context here?
-            })?;
-        self.egl
-            .instance
-            .make_current(self.egl.display, None, None, None)
-            .map_err(|e| {
-                log::error!("make_current(null) failed: {}", e);
-                crate::SurfaceError::Lost
-            })?;
+        sc.surface.swap_buffers(&self.egl.context);
+        self.egl.unmake_current();
 
         Ok(())
     }
@@ -579,7 +570,10 @@ impl Surface {
     unsafe fn unconfigure_impl(
         &self,
         device: &super::Device,
-    ) -> Option<(khronos_egl::Surface, Option<*mut raw::c_void>)> {
+    ) -> Option<(
+        glutin::api::egl::surface::Surface<WindowSurface>,
+        Option<*mut raw::c_void>,
+    )> {
         let gl = &device.shared.context.lock();
         match self.swapchain.write().take() {
             Some(sc) => {
@@ -625,13 +619,15 @@ impl crate::Surface for Surface {
                 // } else {
                 //     khronos_egl::SINGLE_BUFFER
                 // },
-                attributes_builder.with_single_buffer(false);
-                if config.format.is_srgb() {
+                let attributes_builder = attributes_builder.with_single_buffer(false);
+                let attributes_builder = if config.format.is_srgb() {
                     match self.srgb_kind {
                         SrgbFrameBufferKind::None => attributes_builder.with_srgb(None),
                         _ => attributes_builder.with_srgb(Some(true)),
-                    };
-                }
+                    }
+                } else {
+                    attributes_builder
+                };
                 let attributes = attributes_builder.build(
                     self.raw_window_handle,
                     NonZero::new(config.extent.width)
@@ -639,15 +635,13 @@ impl crate::Surface for Surface {
                     NonZero::new(config.extent.height)
                         .expect("trying to configure the surface with a negative or zero height"),
                 );
-                todo!("create a surface using the glutin display");
-
-                // match raw_result {
-                //     Ok(raw) => (raw, wl_window),
-                //     Err(e) => {
-                //         log::warn!("Error in create_window_surface: {:?}", e);
-                //         return Err(crate::SurfaceError::Lost);
-                //     }
-                // }
+                let surface = unsafe {
+                    self.egl
+                        .display
+                        .create_window_surface(&self.config, &attributes)
+                        .expect("couldn't create surface")
+                };
+                (surface, wl_window)
             }
         };
 
