@@ -13,7 +13,16 @@ use parking_lot::{MappedMutexGuard, Mutex, MutexGuard, RwLock};
 use raw_window_handle::WaylandDisplayHandle;
 
 use std::{
-    collections::HashMap, ffi::{self, CString}, mem::ManuallyDrop, num::NonZero, ops::DerefMut, os::raw, ptr, rc::Rc, sync::Arc, time::Duration
+    collections::HashMap,
+    ffi::{self, CString},
+    mem::ManuallyDrop,
+    num::NonZero,
+    ops::DerefMut,
+    os::raw,
+    ptr,
+    rc::Rc,
+    sync::Arc,
+    time::Duration,
 };
 
 use crate::InstanceError;
@@ -247,8 +256,8 @@ fn choose_config(
     // }
 
     // now search for a config that supports window surface type
-    let mut window_template = glutin::config::ConfigTemplateBuilder::new()
-        .with_surface_type(ConfigSurfaceTypes::WINDOW);
+    let mut window_template =
+        glutin::config::ConfigTemplateBuilder::new().with_surface_type(ConfigSurfaceTypes::WINDOW);
     if srgb_kind != SrgbFrameBufferKind::None {
         window_template = window_template.with_alpha_size(8);
     }
@@ -263,26 +272,27 @@ fn choose_config(
 
     let configs = unsafe {
         display
-        .find_configs(window_template.build())
-        .ok()
-        .expect("No EGL config found for window surface")
+            .find_configs(window_template.build())
+            .ok()
+            .expect("No EGL config found for window surface")
     };
 
-    let config = configs
-        .reduce(|accum, config| {
-            let transparency_check = config.supports_transparency().unwrap_or(false)
-                & !accum.supports_transparency().unwrap_or(false);
+    let config = configs.reduce(|accum, config| {
+        let transparency_check = config.supports_transparency().unwrap_or(false)
+            & !accum.supports_transparency().unwrap_or(false);
 
-            if transparency_check || config.num_samples() > accum.num_samples() {
-                config
-            } else {
-                accum
-            }
-        });
-    
+        if transparency_check || config.num_samples() > accum.num_samples() {
+            config
+        } else {
+            accum
+        }
+    });
+
     match config {
         Some(c) => Ok((c, true)),
-        None => Err(InstanceError::new("No EGL config found for window surface".to_owned())),
+        None => Err(InstanceError::new(
+            "No EGL config found for window surface".to_owned(),
+        )),
     }
 }
 
@@ -332,8 +342,10 @@ impl Inner {
         let (config, supports_native_window) = match choose_config(display.clone(), srgb_kind) {
             Ok((c, n)) => (c, n),
             Err(e) => {
-                return Err(InstanceError::new("No matching gl config found".to_string()));
-            },
+                return Err(InstanceError::new(
+                    "No matching gl config found".to_string(),
+                ));
+            }
         };
 
         log::debug!("Config {:?}", config);
@@ -344,11 +356,19 @@ impl Inner {
         log::debug!("Config depth_size {:?}", config.depth_size());
         log::debug!("Config stencil_size {:?}", config.stencil_size());
         log::debug!("Config num_samples {:?}", config.num_samples());
-        log::debug!("Config config_surface_types {:?}", config.config_surface_types());
-        log::debug!("Config hardware_accelerated {:?}", config.hardware_accelerated());
-        log::debug!("Config supports_transparency {:?}", config.supports_transparency());
+        log::debug!(
+            "Config config_surface_types {:?}",
+            config.config_surface_types()
+        );
+        log::debug!(
+            "Config hardware_accelerated {:?}",
+            config.hardware_accelerated()
+        );
+        log::debug!(
+            "Config supports_transparency {:?}",
+            config.supports_transparency()
+        );
         log::debug!("Config api {:?}", config.api());
-
 
         let context_attributes = ContextAttributesBuilder::new().build(None);
 
@@ -407,8 +427,6 @@ impl Inner {
         //             )
         //         })?
         // };
-
-        
 
         // Make context current
         // let context = not_current_gl_context.make_current(&pbuffer).unwrap();
@@ -611,7 +629,6 @@ impl Surface {
             log::error!("Failed make_current()");
         }
 
-
         unsafe { gl.disable(glow::SCISSOR_TEST) };
         unsafe { gl.color_mask(true, true, true, true) };
 
@@ -690,7 +707,8 @@ impl crate::Surface for Surface {
         let surface = match unsafe { self.unconfigure_impl(device) } {
             Some(pair) => pair,
             None => {
-                let attributes_builder = glutin::surface::SurfaceAttributesBuilder::<WindowSurface>::new();
+                let attributes_builder =
+                    glutin::surface::SurfaceAttributesBuilder::<WindowSurface>::new();
                 // We don't want any of the buffering done by the driver, because we
                 // manage a swapchain on our side.
                 // Some drivers just fail on surface creation seeing `EGL_SINGLE_BUFFER`.
@@ -794,7 +812,7 @@ impl crate::Surface for Surface {
             drop(surface);
         }
     }
-    
+
     unsafe fn acquire_texture(
         &self,
         _timeout: Option<Duration>,
@@ -822,6 +840,6 @@ impl crate::Surface for Surface {
             suboptimal: false,
         }))
     }
-    
+
     unsafe fn discard_texture(&self, _texture: <Self::A as crate::Api>::SurfaceTexture) {}
 }
