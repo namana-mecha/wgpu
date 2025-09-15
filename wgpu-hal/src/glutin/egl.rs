@@ -1,11 +1,19 @@
 use glow::HasContext;
-use glutin::{api::egl::Egl, config::{Api, Config, ConfigSurfaceTypes, GlConfig}, context::{AsRawContext, ContextApi, ContextAttributesBuilder, RawContext, Version}, display::{AsRawDisplay, DisplayApiPreference, GetDisplayExtensions, GetGlDisplay}, prelude::{GlDisplay, NotCurrentGlContext, PossiblyCurrentGlContext}, surface::AsRawSurface};
+use glutin::{
+    api::egl::Egl,
+    config::{Api, Config, ConfigSurfaceTypes, GlConfig},
+    context::{AsRawContext, ContextApi, ContextAttributesBuilder, RawContext, Version},
+    display::{AsRawDisplay, DisplayApiPreference, GetDisplayExtensions, GetGlDisplay},
+    prelude::{GlDisplay, NotCurrentGlContext, PossiblyCurrentGlContext},
+    surface::AsRawSurface,
+};
 use khronos_egl::Downcast;
 use once_cell::sync::Lazy;
 use parking_lot::{MappedMutexGuard, Mutex, MutexGuard, RwLock};
 
 use std::{
-    collections::HashMap, ffi, mem::ManuallyDrop, num::NonZero, os::raw, ptr, rc::Rc, sync::Arc, time::Duration
+    collections::HashMap, ffi, mem::ManuallyDrop, num::NonZero, os::raw, ptr, rc::Rc, sync::Arc,
+    time::Duration,
 };
 
 fn parse_egl_version(version_str: &str) -> Option<(i32, i32)> {
@@ -28,7 +36,7 @@ struct EglContext {
     context: Arc<glutin::api::egl::context::PossiblyCurrentContext>,
     version: (i32, i32),
     display: glutin::api::egl::display::Display,
-    pbuffer: glutin::api::egl::surface::Surface<glutin::surface::PbufferSurface>
+    pbuffer: glutin::api::egl::surface::Surface<glutin::surface::PbufferSurface>,
 }
 
 impl EglContext {
@@ -64,9 +72,7 @@ impl<'a> std::ops::Deref for AdapterContextLock<'a> {
 impl<'a> Drop for AdapterContextLock<'a> {
     fn drop(&mut self) {
         if let Some(egl) = self.egl.take() {
-            egl.context
-                .make_current_surfaceless()
-                .unwrap();
+            egl.context.make_current_surfaceless().unwrap();
         }
     }
 }
@@ -106,13 +112,13 @@ impl AdapterContext {
                 let display = egl.display();
                 let version_str = display.version_string();
                 Some(parse_egl_version(&version_str).unwrap())
-            },
+            }
             None => None,
         };
         version
     }
 
-    pub fn raw_context(&self) -> Option<RawContext> {        
+    pub fn raw_context(&self) -> Option<RawContext> {
         match self.egl {
             Some(ref egl) => Some(egl.raw_context()),
             None => None,
@@ -140,7 +146,7 @@ struct Inner {
     supports_native_window: bool,
     config: glutin::api::egl::config::Config,
     // #[cfg_attr(Emscripten, allow(dead_code))]
-    // wl_display: Option<*mut raw::c_void>,
+    wl_display: Option<*mut raw::c_void>,
     #[cfg_attr(Emscripten, allow(dead_code))]
     force_gles_minor_version: wgt::Gles3MinorVersion,
     /// Method by which the framebuffer should support srgb
@@ -162,7 +168,6 @@ impl Inner {
         log::info!("Display version: {:?}", display_version);
         log::info!("Display extensions: {:?}", display_extensions);
 
-
         let srgb_kind = if version >= (1, 5) {
             log::debug!("\tEGL surface: +srgb");
             SrgbFrameBufferKind::Core
@@ -173,14 +178,13 @@ impl Inner {
             log::warn!("\tEGL surface: -srgb");
             SrgbFrameBufferKind::None
         };
-        
+
         let mut template = glutin::config::ConfigTemplateBuilder::new()
-                                            .prefer_hardware_accelerated(Some(true))
-                                            .with_surface_type(ConfigSurfaceTypes::WINDOW.union(ConfigSurfaceTypes::PBUFFER))
-                                            .with_api(Api::GLES2);
+            .prefer_hardware_accelerated(Some(true))
+            .with_surface_type(ConfigSurfaceTypes::WINDOW.union(ConfigSurfaceTypes::PBUFFER))
+            .with_api(Api::GLES2);
         if srgb_kind != SrgbFrameBufferKind::None {
-            template = template
-                            .with_alpha_size(8);
+            template = template.with_alpha_size(8);
         }
 
         let config = unsafe {
@@ -191,7 +195,9 @@ impl Inner {
                 .ok_or(crate::InstanceError::new("No EGL configs found".to_owned()))?
         };
 
-        let supports_native_window = config.config_surface_types().contains(ConfigSurfaceTypes::WINDOW);
+        let supports_native_window = config
+            .config_surface_types()
+            .contains(ConfigSurfaceTypes::WINDOW);
 
         let context_attributes = ContextAttributesBuilder::new().build(None);
 
@@ -206,37 +212,40 @@ impl Inner {
         let legacy_context_attributes = ContextAttributesBuilder::new()
             .with_context_api(ContextApi::OpenGl(Some(Version::new(2, 1))))
             .build(None);
-        
+
         // TODO port from gles handle robustness, opengl / opengles
 
         let not_current_gl_context = unsafe {
-            display.create_context(&config, &context_attributes).unwrap_or_else(|_| {
-                display.create_context(&config, &fallback_context_attributes).unwrap_or_else(
-                    |_| {
-                        display
-                            .create_context(&config, &legacy_context_attributes)
-                            .expect("failed to create context")
-                    },
-                )
-            })
+            display
+                .create_context(&config, &context_attributes)
+                .unwrap_or_else(|_| {
+                    display
+                        .create_context(&config, &fallback_context_attributes)
+                        .unwrap_or_else(|_| {
+                            display
+                                .create_context(&config, &legacy_context_attributes)
+                                .expect("failed to create context")
+                        })
+                })
         };
 
         // Create a dummy pbuffer surface
-        let attrs = glutin::surface::SurfaceAttributesBuilder::<glutin::surface::PbufferSurface>::new()
-            .build(
-                NonZero::new(1).unwrap(), // width
-                NonZero::new(1).unwrap(), // height
-            );
+        let attrs =
+            glutin::surface::SurfaceAttributesBuilder::<glutin::surface::PbufferSurface>::new()
+                .build(
+                    NonZero::new(1).unwrap(), // width
+                    NonZero::new(1).unwrap(), // height
+                );
 
         // Testing if context can be binded without surface
         // and creating dummy pbuffer surface if not.
         // TODO: gles check if it supports surfaceless
         let pbuffer = unsafe {
-            display.create_pbuffer_surface(&config, &attrs)
+            display
+                .create_pbuffer_surface(&config, &attrs)
                 .expect("Cannot create pbuffer_surface")
         };
 
-        
         // Make context current
         let context = not_current_gl_context.make_current(&pbuffer).unwrap();
 
@@ -247,6 +256,7 @@ impl Inner {
                 pbuffer,
                 version,
             },
+            wl_display: None,
             version: (3, 0), // Example version
             supports_native_window,
             config,
@@ -297,7 +307,7 @@ impl crate::Instance for Instance {
 
         // TODO: print client extensions
         // TODO: Port gles backend debug code - context attributes builder has with_debug()
-        
+
         let inner = Inner::create(desc.flags, display, desc.gles_minor_version)?;
 
         Ok(Instance {
@@ -314,7 +324,19 @@ impl crate::Instance for Instance {
         display_handle: raw_window_handle::RawDisplayHandle,
         window_handle: raw_window_handle::RawWindowHandle,
     ) -> Result<<Self::A as crate::Api>::Surface, crate::InstanceError> {
-        todo!()
+        let mut inner = self.inner.lock();
+        
+        inner.egl.unmake_current();
+
+        Ok(Surface {
+            egl: inner.egl.clone(),
+            wsi: self.wsi.clone(),
+            config: inner.config,
+            presentable: inner.supports_native_window,
+            raw_window_handle: window_handle,
+            swapchain: RwLock::new(None),
+            srgb_kind: inner.srgb_kind,
+        })
     }
 
     unsafe fn enumerate_adapters(
