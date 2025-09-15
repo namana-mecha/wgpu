@@ -1,5 +1,5 @@
 use glow::HasContext;
-use glutin::{api::egl::Egl, config::{Api, Config, ConfigSurfaceTypes, GlConfig}, context::{AsRawContext, ContextApi, ContextAttributesBuilder, RawContext, Version}, display::{AsRawDisplay, DisplayApiPreference, GetDisplayExtensions, GetGlDisplay}, prelude::{GlDisplay, NotCurrentGlContext, PossiblyCurrentGlContext}};
+use glutin::{api::egl::Egl, config::{Api, Config, ConfigSurfaceTypes, GlConfig}, context::{AsRawContext, ContextApi, ContextAttributesBuilder, RawContext, Version}, display::{AsRawDisplay, DisplayApiPreference, GetDisplayExtensions, GetGlDisplay}, prelude::{GlDisplay, NotCurrentGlContext, PossiblyCurrentGlContext}, surface::AsRawSurface};
 use khronos_egl::Downcast;
 use once_cell::sync::Lazy;
 use parking_lot::{MappedMutexGuard, Mutex, MutexGuard, RwLock};
@@ -23,26 +23,22 @@ fn parse_egl_version(version_str: &str) -> Option<(i32, i32)> {
     Some((major, minor))
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 struct EglContext {
     context: Arc<glutin::api::egl::context::PossiblyCurrentContext>,
     version: (i32, i32),
-    display: khronos_egl::Display,
-    raw: khronos_egl::Context,
-    pbuffer: Option<khronos_egl::Surface>,
+    display: glutin::api::egl::display::Display,
+    pbuffer: glutin::api::egl::surface::Surface<glutin::surface::PbufferSurface>
 }
 
 impl EglContext {
     fn make_current(&self) {
-        self.instance
-            .make_current(self.display, self.pbuffer, self.pbuffer, Some(self.raw))
-            .unwrap();
+        let _ = self.context.make_current(&self.pbuffer);
     }
 
-    fn unmake_current(&self) {
-        self.instance
-            .make_current(self.display, None, None, None)
-            .unwrap();
+    fn unmake_current(&mut self) {
+        // TODO is make_not_current_in_place() okay, or should we switch to make_not_current?
+        let _ = self.context.make_not_current_in_place();
     }
 }
 
@@ -180,7 +176,7 @@ impl Inner {
         
         let mut template = glutin::config::ConfigTemplateBuilder::new()
                                             .prefer_hardware_accelerated(Some(true))
-                                            .with_surface_type(ConfigSurfaceTypes::WINDOW & ConfigSurfaceTypes::PBUFFER)
+                                            .with_surface_type(ConfigSurfaceTypes::WINDOW.union(ConfigSurfaceTypes::PBUFFER))
                                             .with_api(Api::GLES2);
         if srgb_kind != SrgbFrameBufferKind::None {
             template = template
@@ -194,6 +190,8 @@ impl Inner {
                 .next()
                 .ok_or(crate::InstanceError::new("No EGL configs found".to_owned()))?
         };
+
+        let supports_native_window = config.config_surface_types().contains(ConfigSurfaceTypes::WINDOW);
 
         let context_attributes = ContextAttributesBuilder::new().build(None);
 
@@ -209,6 +207,8 @@ impl Inner {
             .with_context_api(ContextApi::OpenGl(Some(Version::new(2, 1))))
             .build(None);
         
+        // TODO port from gles handle robustness, opengl / opengles
+
         let not_current_gl_context = unsafe {
             display.create_context(&config, &context_attributes).unwrap_or_else(|_| {
                 display.create_context(&config, &fallback_context_attributes).unwrap_or_else(
@@ -230,23 +230,25 @@ impl Inner {
 
         // Testing if context can be binded without surface
         // and creating dummy pbuffer surface if not.
+        // TODO: gles check if it supports surfaceless
         let pbuffer = unsafe {
             display.create_pbuffer_surface(&config, &attrs)
                 .expect("Cannot create pbuffer_surface")
         };
 
+        
         // Make context current
-        let gl_context = not_current_gl_context.make_current(&surface).unwrap();
+        let context = not_current_gl_context.make_current(&pbuffer).unwrap();
 
         Ok(Self {
             egl: EglContext {
                 display,
-                raw: context,
+                context: Arc::new(context),
                 pbuffer,
                 version,
             },
             version: (3, 0), // Example version
-            supports_native_window: true,
+            supports_native_window,
             config,
             force_gles_minor_version,
             srgb_kind,
