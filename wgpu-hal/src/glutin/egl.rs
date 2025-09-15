@@ -36,7 +36,7 @@ struct EglContext {
     context: Arc<glutin::api::egl::context::PossiblyCurrentContext>,
     version: (i32, i32),
     display: glutin::api::egl::display::Display,
-    pbuffer: glutin::api::egl::surface::Surface<glutin::surface::PbufferSurface>,
+    pbuffer: Arc<glutin::api::egl::surface::Surface<glutin::surface::PbufferSurface>>,
 }
 
 impl EglContext {
@@ -253,7 +253,7 @@ impl Inner {
             egl: EglContext {
                 display,
                 context: Arc::new(context),
-                pbuffer,
+                pbuffer: Arc::new(pbuffer),
                 version,
             },
             version: (3, 0), // Example version
