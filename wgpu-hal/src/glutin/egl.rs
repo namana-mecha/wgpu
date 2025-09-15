@@ -5,14 +5,14 @@ use glutin::{
     context::{AsRawContext, ContextApi, ContextAttributesBuilder, RawContext, Version},
     display::{AsRawDisplay, DisplayApiPreference, GetDisplayExtensions, GetGlDisplay},
     prelude::{GlDisplay, NotCurrentGlContext, PossiblyCurrentGlContext},
-    surface::AsRawSurface,
+    surface::{AsRawSurface, WindowSurface},
 };
 use khronos_egl::Downcast;
 use once_cell::sync::Lazy;
 use parking_lot::{MappedMutexGuard, Mutex, MutexGuard, RwLock};
 
 use std::{
-    collections::HashMap, ffi, mem::ManuallyDrop, num::NonZero, os::raw, ptr, rc::Rc, sync::Arc,
+    collections::HashMap, ffi::{self, CString}, mem::ManuallyDrop, num::NonZero, os::raw, ptr, rc::Rc, sync::Arc,
     time::Duration,
 };
 
@@ -31,7 +31,7 @@ fn parse_egl_version(version_str: &str) -> Option<(i32, i32)> {
     Some((major, minor))
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct EglContext {
     context: Arc<glutin::api::egl::context::PossiblyCurrentContext>,
     version: (i32, i32),
@@ -321,9 +321,11 @@ impl crate::Instance for Instance {
 
     unsafe fn create_surface(
         &self,
-        display_handle: raw_window_handle::RawDisplayHandle,
+        _display_handle: raw_window_handle::RawDisplayHandle,
         window_handle: raw_window_handle::RawWindowHandle,
     ) -> Result<<Self::A as crate::Api>::Surface, crate::InstanceError> {
+        // not using the display handle passed, as in glutin backend we 
+        // are already passing the display handle in instance desc
         let mut inner = self.inner.lock();
         
         inner.egl.unmake_current();
@@ -331,7 +333,7 @@ impl crate::Instance for Instance {
         Ok(Surface {
             egl: inner.egl.clone(),
             wsi: self.wsi.clone(),
-            config: inner.config,
+            config: inner.config.clone(),
             presentable: inner.supports_native_window,
             raw_window_handle: window_handle,
             swapchain: RwLock::new(None),
@@ -343,13 +345,58 @@ impl crate::Instance for Instance {
         &self,
         surface_hint: Option<&<Self::A as crate::Api>::Surface>,
     ) -> Vec<crate::ExposedAdapter<Self::A>> {
-        todo!()
+        let mut inner = self.inner.lock();
+        inner.egl.make_current();
+
+        let mut gl = unsafe {
+            glow::Context::from_loader_function(|name| {
+                inner
+                    .egl
+                    .display
+                    .get_proc_address(CString::new(name).unwrap().as_c_str())
+            })
+        };
+
+        // In contrast to OpenGL ES, OpenGL requires explicitly enabling sRGB conversions,
+        // as otherwise the user has to do the sRGB conversion.
+        if !matches!(inner.srgb_kind, SrgbFrameBufferKind::None) {
+            unsafe { gl.enable(glow::FRAMEBUFFER_SRGB) };
+        }
+
+        if self.flags.contains(wgt::InstanceFlags::DEBUG) && gl.supports_debug() {
+            log::debug!("Max label length: {}", unsafe {
+                gl.get_parameter_i32(glow::MAX_LABEL_LENGTH)
+            });
+        }
+
+        if self.flags.contains(wgt::InstanceFlags::VALIDATION) && gl.supports_debug() {
+            log::debug!("Enabling GLES debug output");
+            unsafe { gl.enable(glow::DEBUG_OUTPUT) };
+            unsafe { gl.debug_message_callback(super::gl_debug_message_callback) };
+        }
+
+        todo!();
+
+        // Wrap in ManuallyDrop to make it easier to "current" the GL context before dropping this
+        // GLOW context, which could also happen if a panic occurs after we uncurrent the context
+        // below but before AdapterContext is constructed.
+        // let gl = ManuallyDrop::new(gl);
+        // inner.egl.unmake_current();
+
+        // unsafe {
+        //     super::Adapter::expose(AdapterContext {
+        //         glow: Mutex::new(gl),
+        //         egl: Some(inner.egl.clone()),
+        //     })
+        // }
+        // .into_iter()
+        // .collect()
     }
 }
 
 #[derive(Debug)]
 pub struct Swapchain {
-    surface: glutin::api::egl::surface::Surface,
+    surface: glutin::api::egl::surface::Surface<WindowSurface>,
     // TODO: remove the wl_window as we are having the raw_window_handle(somewhere)
     wl_window: Option<*mut raw::c_void>,
     framebuffer: glow::Framebuffer,
@@ -364,7 +411,7 @@ pub struct Swapchain {
 #[derive(Debug)]
 pub struct Surface {
     egl: EglContext,
-    // wsi: WindowSystemInterface,
+    wsi: WindowSystemInterface,
     config: glutin::api::egl::config::Config,
     pub(super) presentable: bool,
     raw_window_handle: raw_window_handle::RawWindowHandle,
