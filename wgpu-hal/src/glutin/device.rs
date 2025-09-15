@@ -1591,12 +1591,12 @@ impl crate::Device for super::Device {
     }
 
     unsafe fn start_capture(&self) -> bool {
-        #[cfg(all(native, feature = "renderdoc"))]
-        return unsafe {
-            self.render_doc
-                .start_frame_capture(self.shared.context.raw_context(), ptr::null_mut())
-        };
-        #[allow(unreachable_code)]
+        // #[cfg(all(native, feature = "renderdoc"))]
+        // return unsafe {
+        //     self.render_doc
+        //         .start_frame_capture(self.shared.context.raw_context(), ptr::null_mut())
+        // };
+        // #[allow(unreachable_code)]
         false
     }
     unsafe fn stop_capture(&self) {
